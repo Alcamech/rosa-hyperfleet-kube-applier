@@ -253,6 +253,12 @@ func (c *ApplyDesireController) applyDesired(ctx context.Context, d *kubeapplier
 	if applyErr != nil {
 		return 0, fmt.Errorf("server-side apply: %w", applyErr)
 	}
+	klog.FromContext(ctx).V(4).Info("server-side apply succeeded",
+		"resource", gvr.Resource,
+		"namespace", target.Namespace,
+		"name", target.Name,
+		"generation", result.GetGeneration(),
+	)
 	return result.GetGeneration(), nil
 }
 
