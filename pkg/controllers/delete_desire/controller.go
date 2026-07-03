@@ -66,6 +66,7 @@ type DeleteDesireController struct {
 	specFetcher          *deleteDesireSpecFetcher
 	dyn                  dynamic.Interface
 	writer               desirestatuswriter.StatusWriter[kubeapplier.DeleteDesire, keys.DeleteDesireKey]
+	statusCRUD           database.ResourceCRUD[kubeapplier.DeleteDesire]
 	queue                workqueue.TypedRateLimitingInterface[keys.DeleteDesireKey]
 
 	cfg      Config
@@ -104,6 +105,7 @@ func NewDeleteDesireController(
 			&deleteDesireReplacer{crud: statusCRUD},
 			&deleteDesireCreator{crud: statusCRUD},
 		),
+		statusCRUD: statusCRUD,
 		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
 			workqueue.DefaultTypedControllerRateLimiter[keys.DeleteDesireKey](),
 			workqueue.TypedRateLimitingQueueConfig[keys.DeleteDesireKey]{Name: "DeleteDesireController"},
@@ -160,6 +162,12 @@ func (c *DeleteDesireController) handleDelete(obj any) {
 	c.mu.Lock()
 	delete(c.completedCache, d.GetDocumentID())
 	c.mu.Unlock()
+
+	// Best-effort: delete the corresponding status record so orphaned status
+	// entries don't accumulate in the status table indefinitely.
+	if err := c.statusCRUD.Delete(context.Background(), d.GetDocumentID()); err != nil && !database.IsNotFoundError(err) {
+		klog.ErrorS(err, "failed to delete status record for deleted DeleteDesire", "documentID", d.GetDocumentID())
+	}
 }
 
 func (c *DeleteDesireController) handleUpdate(oldObj, newObj any) {

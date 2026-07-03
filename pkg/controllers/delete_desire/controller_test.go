@@ -338,6 +338,7 @@ func TestHandleDelete_RemovesFromCompletedCache(t *testing.T) {
 	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
 	c := &DeleteDesireController{
 		completedCache: map[string]bool{d.GetDocumentID(): true},
+		statusCRUD:     listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire](),
 	}
 
 	c.handleDelete(d)
@@ -353,6 +354,7 @@ func TestHandleDelete_TombstoneRemovesFromCompletedCache(t *testing.T) {
 	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
 	c := &DeleteDesireController{
 		completedCache: map[string]bool{d.GetDocumentID(): true},
+		statusCRUD:     listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire](),
 	}
 
 	// Simulate a tombstone object as delivered by the informer on resync.
@@ -363,6 +365,28 @@ func TestHandleDelete_TombstoneRemovesFromCompletedCache(t *testing.T) {
 	defer c.mu.RUnlock()
 	if c.completedCache[d.GetDocumentID()] {
 		t.Error("expected documentID to be removed from completedCache via tombstone")
+	}
+}
+
+func TestHandleDelete_DeletesStatusRecord(t *testing.T) {
+	ctx := context.Background()
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+
+	statusCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+	// Seed a status record for this desire.
+	if _, err := statusCRUD.Create(ctx, d); err != nil {
+		t.Fatalf("create status record: %v", err)
+	}
+
+	c := &DeleteDesireController{
+		completedCache: make(map[string]bool),
+		statusCRUD:     statusCRUD,
+	}
+	c.handleDelete(d)
+
+	_, err := statusCRUD.Get(ctx, d.GetDocumentID())
+	if err == nil {
+		t.Error("expected status record to be deleted, but Get succeeded")
 	}
 }
 
