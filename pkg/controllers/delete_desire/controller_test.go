@@ -286,7 +286,7 @@ func TestSyncOnce_DesireNotFound(t *testing.T) {
 	crud := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
 	c := &DeleteDesireController{
 		specFetcher:    &deleteDesireSpecFetcher{reader: crud},
-		completedCache: make(map[string]bool),
+		completedCache: make(map[completedCacheKey]bool),
 	}
 
 	key := keys.DeleteDesireKey{ClusterID: "c1", Name: "cluster1--cm1"}
@@ -315,7 +315,7 @@ func TestSyncOnce_Success_TargetAbsent(t *testing.T) {
 		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
 		dyn:            dyn,
 		writer:         writer,
-		completedCache: make(map[string]bool),
+		completedCache: make(map[completedCacheKey]bool),
 	}
 
 	key := mustKey(t, created)
@@ -337,8 +337,9 @@ func TestSyncOnce_Success_TargetAbsent(t *testing.T) {
 
 func TestHandleDelete_RemovesFromCompletedCache(t *testing.T) {
 	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	ck := completedCacheKey{documentID: d.GetDocumentID(), updateTime: d.GetUpdateTime()}
 	c := &DeleteDesireController{
-		completedCache: map[string]bool{d.GetDocumentID(): true},
+		completedCache: map[completedCacheKey]bool{ck: true},
 		statusCRUD:     listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire](),
 	}
 
@@ -346,15 +347,16 @@ func TestHandleDelete_RemovesFromCompletedCache(t *testing.T) {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.completedCache[d.GetDocumentID()] {
-		t.Error("expected documentID to be removed from completedCache after delete")
+	if c.completedCache[ck] {
+		t.Error("expected cache entry to be removed after delete")
 	}
 }
 
 func TestHandleDelete_TombstoneRemovesFromCompletedCache(t *testing.T) {
 	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	ck := completedCacheKey{documentID: d.GetDocumentID(), updateTime: d.GetUpdateTime()}
 	c := &DeleteDesireController{
-		completedCache: map[string]bool{d.GetDocumentID(): true},
+		completedCache: map[completedCacheKey]bool{ck: true},
 		statusCRUD:     listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire](),
 	}
 
@@ -364,8 +366,8 @@ func TestHandleDelete_TombstoneRemovesFromCompletedCache(t *testing.T) {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.completedCache[d.GetDocumentID()] {
-		t.Error("expected documentID to be removed from completedCache via tombstone")
+	if c.completedCache[ck] {
+		t.Error("expected cache entry to be removed via tombstone")
 	}
 }
 
@@ -380,7 +382,7 @@ func TestHandleDelete_DeletesStatusRecord(t *testing.T) {
 	}
 
 	c := &DeleteDesireController{
-		completedCache: make(map[string]bool),
+		completedCache: make(map[completedCacheKey]bool),
 		statusCRUD:     statusCRUD,
 	}
 	c.handleDelete(d)
@@ -476,20 +478,26 @@ func TestPreloadCompletedCache_OnlyStoresSuccessfulTrue(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	c := &DeleteDesireController{completedCache: make(map[string]bool)}
+	c := &DeleteDesireController{completedCache: make(map[completedCacheKey]bool)}
 	if err := c.PreloadCompletedCache(ctx, statusCRUD); err != nil {
 		t.Fatalf("PreloadCompletedCache: %v", err)
 	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if !c.completedCache["doc-true"] {
+	// PreloadCompletedCache keys by (documentID, ObservedDesireUpdateTime).
+	// dTrue has UpdateTime set by newDeleteDesire (Unix 1), ObservedDesireUpdateTime is zero
+	// since we never set it explicitly — the cache key uses the zero time.
+	ckTrue := completedCacheKey{documentID: "doc-true", updateTime: dTrue.Status.ObservedDesireUpdateTime}
+	if !c.completedCache[ckTrue] {
 		t.Error("expected doc-true to be in completedCache")
 	}
-	if c.completedCache["doc-false"] {
+	ckFalse := completedCacheKey{documentID: "doc-false", updateTime: dFalse.Status.ObservedDesireUpdateTime}
+	if c.completedCache[ckFalse] {
 		t.Error("expected doc-false NOT to be in completedCache")
 	}
-	if c.completedCache["doc-none"] {
+	ckNone := completedCacheKey{documentID: "doc-none", updateTime: dNone.Status.ObservedDesireUpdateTime}
+	if c.completedCache[ckNone] {
 		t.Error("expected doc-none NOT to be in completedCache")
 	}
 }
@@ -497,13 +505,23 @@ func TestPreloadCompletedCache_OnlyStoresSuccessfulTrue(t *testing.T) {
 func TestSyncOnce_ShortCircuitsWhenInCompletedCache(t *testing.T) {
 	ctx := context.Background()
 
-	// specFetcher and dyn are nil — any call to them would panic, proving
-	// the short-circuit fires before either is touched.
-	c := &DeleteDesireController{
-		completedCache: map[string]bool{"cluster1--cm1": true},
+	specCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	created, err := specCRUD.Create(ctx, d)
+	if err != nil {
+		t.Fatalf("create: %v", err)
 	}
 
-	key := keys.DeleteDesireKey{ClusterID: "cluster1", Name: "cluster1--cm1"}
+	ck := completedCacheKey{documentID: created.GetDocumentID(), updateTime: created.GetUpdateTime()}
+
+	// dyn is nil — any call to it would panic, proving the short-circuit fires
+	// before evaluate() is reached.
+	c := &DeleteDesireController{
+		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
+		completedCache: map[completedCacheKey]bool{ck: true},
+	}
+
+	key := mustKey(t, created)
 	if err := c.SyncOnce(ctx, key); err != nil {
 		t.Fatalf("SyncOnce should return nil for completed desire, got: %v", err)
 	}
@@ -530,7 +548,7 @@ func TestSyncOnce_PopulatesCompletedCacheOnSuccess(t *testing.T) {
 		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
 		dyn:            dyn,
 		writer:         writer,
-		completedCache: make(map[string]bool),
+		completedCache: make(map[completedCacheKey]bool),
 	}
 
 	key := mustKey(t, created)
@@ -538,10 +556,57 @@ func TestSyncOnce_PopulatesCompletedCacheOnSuccess(t *testing.T) {
 		t.Fatalf("SyncOnce: %v", err)
 	}
 
+	ck := completedCacheKey{documentID: created.GetDocumentID(), updateTime: created.GetUpdateTime()}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if !c.completedCache[created.GetDocumentID()] {
-		t.Errorf("expected documentID %q to be in completedCache after successful delete", created.GetDocumentID())
+	if !c.completedCache[ck] {
+		t.Errorf("expected (documentID=%q, updateTime=%v) to be in completedCache after successful delete",
+			created.GetDocumentID(), created.GetUpdateTime())
+	}
+}
+
+// TestSyncOnce_RecreatedDesireNotShortCircuited is the core correctness test
+// for the (documentID, updateTime) cache key scheme. A stale cache entry for
+// an old updateTime must not short-circuit a re-created desire that has a new
+// updateTime — even when the informer never delivered a DeleteFunc event.
+func TestSyncOnce_RecreatedDesireNotShortCircuited(t *testing.T) {
+	ctx := context.Background()
+	dyn := fakeDynamic(t, map[schema.GroupVersionResource]string{configMapGVR: "ConfigMapList"})
+
+	specCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+	statusCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	d.SetUpdateTime(time.Unix(1, 0))
+	created, err := specCRUD.Create(ctx, d)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Seed the cache with a stale entry for the same documentID but old updateTime.
+	staleKey := completedCacheKey{documentID: created.GetDocumentID(), updateTime: time.Unix(0, 0)}
+
+	statusFetcher := &deleteDesireStatusFetcher{crud: statusCRUD}
+	writer := desirestatuswriter.New[kubeapplier.DeleteDesire, keys.DeleteDesireKey, *kubeapplier.DeleteDesire](
+		statusFetcher, &deleteDesireReplacer{crud: statusCRUD}, &deleteDesireCreator{crud: statusCRUD},
+	)
+	c := &DeleteDesireController{
+		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
+		dyn:            dyn,
+		writer:         writer,
+		completedCache: map[completedCacheKey]bool{staleKey: true},
+	}
+
+	key := mustKey(t, created)
+	if err := c.SyncOnce(ctx, key); err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+
+	// The stale entry should NOT have caused a short-circuit: a status record
+	// must have been written.
+	_, err = statusCRUD.Get(ctx, created.GetDocumentID())
+	if err != nil {
+		t.Errorf("expected status record to be written (desire was NOT short-circuited), got: %v", err)
 	}
 }
 

@@ -58,6 +58,15 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
+// completedCacheKey identifies a specific version of a DeleteDesire that has
+// reached Successful=True. Including the UpdateTime means a re-created desire
+// with the same documentID but a newer UpdateTime will never match the stale
+// entry, so the cache is self-correcting without relying on DeleteFunc events.
+type completedCacheKey struct {
+	documentID string
+	updateTime time.Time
+}
+
 // DeleteDesireController reconciles DeleteDesires by deleting their target items
 // and reporting WaitingForDeletion until the items actually disappear.
 type DeleteDesireController struct {
@@ -72,13 +81,15 @@ type DeleteDesireController struct {
 	cfg      Config
 	cooldown controllerutil.CooldownChecker
 
-	// completedCache tracks documentIDs of DeleteDesires that have reached
-	// Successful=True. SyncOnce short-circuits immediately for any key found
-	// here, avoiding redundant kube-apiserver GETs for already-completed
-	// deletes. Populated at startup by PreloadCompletedCache and updated
-	// incrementally as deletes complete.
+	// completedCache tracks (documentID, updateTime) pairs for DeleteDesires
+	// that have reached Successful=True. SyncOnce short-circuits immediately
+	// for any key found here, avoiding redundant kube-apiserver GETs for
+	// already-completed deletes. Keying by updateTime means a re-created desire
+	// with the same documentID but a new updateTime will never hit a stale
+	// entry — no reliance on DeleteFunc eviction for correctness.
+	// Populated at startup by PreloadCompletedCache and updated incrementally.
 	mu             sync.RWMutex
-	completedCache map[string]bool
+	completedCache map[completedCacheKey]bool
 }
 
 // NewDeleteDesireController wires up the informer event handler and returns a
@@ -112,7 +123,7 @@ func NewDeleteDesireController(
 		),
 		cfg:            cfg,
 		cooldown:       cooldownChecker,
-		completedCache: make(map[string]bool),
+		completedCache: make(map[completedCacheKey]bool),
 	}
 
 	if _, err := deleteDesireInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -157,10 +168,12 @@ func (c *DeleteDesireController) handleDelete(obj any) {
 	if !ok {
 		return
 	}
-	// Remove from the completed cache so a future DeleteDesire with the same
-	// documentID is not incorrectly short-circuited.
+	// Best-effort eviction from the completed cache to reclaim memory.
+	// Correctness does not depend on this: if the event is missed, the next
+	// SyncOnce for a re-created desire will use a different updateTime and
+	// therefore never match the stale entry.
 	c.mu.Lock()
-	delete(c.completedCache, d.GetDocumentID())
+	delete(c.completedCache, completedCacheKey{documentID: d.GetDocumentID(), updateTime: d.GetUpdateTime()})
 	c.mu.Unlock()
 
 	// Best-effort: delete the corresponding status record so orphaned status
@@ -237,7 +250,7 @@ func (c *DeleteDesireController) PreloadCompletedCache(ctx context.Context, stat
 	for _, item := range items {
 		cond := meta.FindStatusCondition(item.Status.Conditions, kubeapplier.ConditionTypeSuccessful)
 		if cond != nil && cond.Status == metav1.ConditionTrue {
-			c.completedCache[item.GetDocumentID()] = true
+			c.completedCache[completedCacheKey{documentID: item.GetDocumentID(), updateTime: item.Status.ObservedDesireUpdateTime}] = true
 		}
 	}
 	logger.Info("preloaded completed cache", "total", len(items), "completed", len(c.completedCache))
@@ -246,15 +259,6 @@ func (c *DeleteDesireController) PreloadCompletedCache(ctx context.Context, stat
 
 // SyncOnce performs a single reconcile pass for the named DeleteDesire.
 func (c *DeleteDesireController) SyncOnce(ctx context.Context, key keys.DeleteDesireKey) error {
-	// Short-circuit: if this desire is already known to be Successful=True,
-	// skip all kube-apiserver and DynamoDB calls entirely.
-	c.mu.RLock()
-	done := c.completedCache[key.Name]
-	c.mu.RUnlock()
-	if done {
-		return nil
-	}
-
 	desire, err := c.specFetcher.Fetch(ctx, key)
 	if database.IsNotFoundError(err) {
 		return nil
@@ -263,6 +267,19 @@ func (c *DeleteDesireController) SyncOnce(ctx context.Context, key keys.DeleteDe
 		return err
 	}
 	if desire == nil {
+		return nil
+	}
+
+	// Short-circuit: if this exact (documentID, updateTime) pair is already
+	// known to be Successful=True, skip all kube-apiserver calls. Using
+	// updateTime as part of the key means a re-created desire with the same
+	// documentID but a newer updateTime will never match a stale entry — no
+	// reliance on DeleteFunc eviction for correctness.
+	ck := completedCacheKey{documentID: desire.GetDocumentID(), updateTime: desire.GetUpdateTime()}
+	c.mu.RLock()
+	done := c.completedCache[ck]
+	c.mu.RUnlock()
+	if done {
 		return nil
 	}
 
@@ -283,7 +300,7 @@ func (c *DeleteDesireController) SyncOnce(ctx context.Context, key keys.DeleteDe
 	cond := meta.FindStatusCondition(probe.Status.Conditions, kubeapplier.ConditionTypeSuccessful)
 	if cond != nil && cond.Status == metav1.ConditionTrue {
 		c.mu.Lock()
-		c.completedCache[desire.GetDocumentID()] = true
+		c.completedCache[ck] = true
 		c.mu.Unlock()
 	}
 
