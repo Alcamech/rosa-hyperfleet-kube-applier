@@ -19,7 +19,11 @@ func NewKubeconfig(kubeconfigPath string) (*rest.Config, error) {
 
 // NewDynamicClient returns a dynamic.Interface backed by cfg. Every controller
 // shares this single client; per-instance reflectors scope themselves to a
-// single GVR + name via the ListWatch.
-func NewDynamicClient(cfg *rest.Config) (dynamic.Interface, error) {
-	return dynamic.NewForConfig(cfg)
+// single GVR + name via the ListWatch. qps and burst control the client-side
+// rate limiter for all kube-apiserver requests made by the controllers.
+func NewDynamicClient(cfg *rest.Config, qps float32, burst int) (dynamic.Interface, error) {
+	dynCfg := rest.CopyConfig(cfg)
+	dynCfg.QPS = qps
+	dynCfg.Burst = burst
+	return dynamic.NewForConfig(dynCfg)
 }

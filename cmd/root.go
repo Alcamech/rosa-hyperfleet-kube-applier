@@ -35,6 +35,8 @@ type KubeApplierRootCmdFlags struct {
 	LeaderElectionID           string
 	LogVerbosity               int
 	ExitOnPanic                bool
+	KubeQPS                    float32
+	KubeBurst                  int
 }
 
 func (f *KubeApplierRootCmdFlags) AddFlags(cmd *cobra.Command) {
@@ -62,6 +64,10 @@ func (f *KubeApplierRootCmdFlags) AddFlags(cmd *cobra.Command) {
 		"Log verbosity. 0 is INFO; higher values are more verbose.")
 	cmd.Flags().BoolVar(&f.ExitOnPanic, "exit-on-panic", f.ExitOnPanic,
 		"If set, the process exits on any goroutine panic via apimachinery's HandleCrash.")
+	cmd.Flags().Float32Var(&f.KubeQPS, "kube-qps", f.KubeQPS,
+		"Maximum QPS to the kube-apiserver from the dynamic client.")
+	cmd.Flags().IntVar(&f.KubeBurst, "kube-burst", f.KubeBurst,
+		"Maximum burst for throttle on requests to the kube-apiserver from the dynamic client.")
 
 	for _, name := range []string{"namespace", "management-cluster", "aws-region"} {
 		if err := cmd.MarkFlagRequired(name); err != nil {
@@ -127,7 +133,7 @@ func (f *KubeApplierRootCmdFlags) ToKubeApplierOptions(ctx context.Context) (*ap
 	dbClient := database.NewDynamoDBKubeApplierDBClient(specsClient, statusClient, specsPrefix, statusPrefix)
 	dynamoDBInformers := informers.NewKubeApplierInformers(specsClient, streamsClient, specsPrefix)
 
-	dyn, err := app.NewDynamicClient(kubeconfig)
+	dyn, err := app.NewDynamicClient(kubeconfig, f.KubeQPS, f.KubeBurst)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
@@ -151,6 +157,8 @@ func NewKubeApplierRootCmdFlags() *KubeApplierRootCmdFlags {
 		LeaderElectionID:           "kube-applier",
 		LogVerbosity:               0,
 		ExitOnPanic:                true,
+		KubeQPS:                    100,
+		KubeBurst:                  200,
 	}
 }
 
