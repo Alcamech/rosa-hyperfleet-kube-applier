@@ -25,7 +25,9 @@ import (
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/conditions"
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/desirestatuswriter"
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/keys"
-)var configMapGVR = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+)
+
+var configMapGVR = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 
 func fakeDynamic(t *testing.T, gvrToListKind map[schema.GroupVersionResource]string, objects ...runtime.Object) *fake.FakeDynamicClient {
 	t.Helper()
