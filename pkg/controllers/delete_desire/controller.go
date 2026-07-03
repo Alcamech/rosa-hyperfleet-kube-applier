@@ -116,6 +116,7 @@ func NewDeleteDesireController(
 	if _, err := deleteDesireInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj any) { c.handleAdd(obj) },
 		UpdateFunc: func(oldObj, newObj any) { c.handleUpdate(oldObj, newObj) },
+		DeleteFunc: func(obj any) { c.handleDelete(obj) },
 	}); err != nil {
 		return nil, fmt.Errorf("register informer handler: %w", err)
 	}
@@ -143,6 +144,22 @@ func (c *DeleteDesireController) handleAdd(obj any) {
 		return
 	}
 	c.enqueue(d)
+}
+
+func (c *DeleteDesireController) handleDelete(obj any) {
+	// Support tombstone objects delivered by the informer on cache resync.
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+	d, ok := obj.(*kubeapplier.DeleteDesire)
+	if !ok {
+		return
+	}
+	// Remove from the completed cache so a future DeleteDesire with the same
+	// documentID is not incorrectly short-circuited.
+	c.mu.Lock()
+	delete(c.completedCache, d.GetDocumentID())
+	c.mu.Unlock()
 }
 
 func (c *DeleteDesireController) handleUpdate(oldObj, newObj any) {

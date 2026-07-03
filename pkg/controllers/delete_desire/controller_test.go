@@ -334,6 +334,38 @@ func TestSyncOnce_Success_TargetAbsent(t *testing.T) {
 
 // --- Cadence Tests ---
 
+func TestHandleDelete_RemovesFromCompletedCache(t *testing.T) {
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	c := &DeleteDesireController{
+		completedCache: map[string]bool{d.GetDocumentID(): true},
+	}
+
+	c.handleDelete(d)
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.completedCache[d.GetDocumentID()] {
+		t.Error("expected documentID to be removed from completedCache after delete")
+	}
+}
+
+func TestHandleDelete_TombstoneRemovesFromCompletedCache(t *testing.T) {
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	c := &DeleteDesireController{
+		completedCache: map[string]bool{d.GetDocumentID(): true},
+	}
+
+	// Simulate a tombstone object as delivered by the informer on resync.
+	tombstone := cache.DeletedFinalStateUnknown{Key: d.GetDocumentID(), Obj: d}
+	c.handleDelete(tombstone)
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.completedCache[d.GetDocumentID()] {
+		t.Error("expected documentID to be removed from completedCache via tombstone")
+	}
+}
+
 func TestHandleAdd_QueuesImmediately(t *testing.T) {
 	c := newCadenceController(t, Config{})
 	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
