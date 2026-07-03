@@ -13,9 +13,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -68,6 +70,14 @@ type DeleteDesireController struct {
 
 	cfg      Config
 	cooldown controllerutil.CooldownChecker
+
+	// completedCache tracks documentIDs of DeleteDesires that have reached
+	// Successful=True. SyncOnce short-circuits immediately for any key found
+	// here, avoiding redundant kube-apiserver GETs for already-completed
+	// deletes. Populated at startup by PreloadCompletedCache and updated
+	// incrementally as deletes complete.
+	mu             sync.RWMutex
+	completedCache map[string]bool
 }
 
 // NewDeleteDesireController wires up the informer event handler and returns a
@@ -98,8 +108,9 @@ func NewDeleteDesireController(
 			workqueue.DefaultTypedControllerRateLimiter[keys.DeleteDesireKey](),
 			workqueue.TypedRateLimitingQueueConfig[keys.DeleteDesireKey]{Name: "DeleteDesireController"},
 		),
-		cfg:      cfg,
-		cooldown: cooldownChecker,
+		cfg:            cfg,
+		cooldown:       cooldownChecker,
+		completedCache: make(map[string]bool),
 	}
 
 	if _, err := deleteDesireInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -185,8 +196,38 @@ func (c *DeleteDesireController) processNext(ctx context.Context) bool {
 	return true
 }
 
+// PreloadCompletedCache performs a one-time scan of the status table on
+// startup and marks any DeleteDesire that already has Successful=True as
+// complete in the in-memory cache. This prevents redundant kube-apiserver
+// GETs for deletes that finished before (or during a previous run of) this
+// process. Returns a fatal error if the status table cannot be listed.
+func (c *DeleteDesireController) PreloadCompletedCache(ctx context.Context, statusReader database.ResourceCRUD[kubeapplier.DeleteDesire]) error {
+	items, err := statusReader.List(ctx)
+	if err != nil {
+		return fmt.Errorf("listing delete desire statuses for completed cache preload: %w", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, item := range items {
+		cond := meta.FindStatusCondition(item.Status.Conditions, kubeapplier.ConditionTypeSuccessful)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			c.completedCache[item.GetDocumentID()] = true
+		}
+	}
+	return nil
+}
+
 // SyncOnce performs a single reconcile pass for the named DeleteDesire.
 func (c *DeleteDesireController) SyncOnce(ctx context.Context, key keys.DeleteDesireKey) error {
+	// Short-circuit: if this desire is already known to be Successful=True,
+	// skip all kube-apiserver and DynamoDB calls entirely.
+	c.mu.RLock()
+	done := c.completedCache[key.Name]
+	c.mu.RUnlock()
+	if done {
+		return nil
+	}
+
 	desire, err := c.specFetcher.Fetch(ctx, key)
 	if database.IsNotFoundError(err) {
 		return nil
@@ -199,11 +240,27 @@ func (c *DeleteDesireController) SyncOnce(ctx context.Context, key keys.DeleteDe
 	}
 
 	mutate, _ := c.evaluate(ctx, desire)
-	return c.writer.UpdateStatus(ctx, key, func(d *kubeapplier.DeleteDesire) {
+	if err := c.writer.UpdateStatus(ctx, key, func(d *kubeapplier.DeleteDesire) {
 		d.SetDocumentID(desire.GetDocumentID())
 		d.Status.ObservedDesireUpdateTime = desire.GetUpdateTime()
 		mutate(d)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Check whether this reconcile resulted in Successful=True by applying
+	// the mutate to a throwaway value. If so, mark it in the completed cache
+	// so future resyncs skip it without touching the kube-apiserver.
+	probe := &kubeapplier.DeleteDesire{}
+	mutate(probe)
+	cond := meta.FindStatusCondition(probe.Status.Conditions, kubeapplier.ConditionTypeSuccessful)
+	if cond != nil && cond.Status == metav1.ConditionTrue {
+		c.mu.Lock()
+		c.completedCache[desire.GetDocumentID()] = true
+		c.mu.Unlock()
+	}
+
+	return nil
 }
 
 // evaluate runs the state machine for one DeleteDesire.

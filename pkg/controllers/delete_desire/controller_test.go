@@ -25,9 +25,7 @@ import (
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/conditions"
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/desirestatuswriter"
 	"github.com/rrp-bot/kube-applier-aws/pkg/controllers/keys"
-)
-
-var configMapGVR = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+)var configMapGVR = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 
 func fakeDynamic(t *testing.T, gvrToListKind map[schema.GroupVersionResource]string, objects ...runtime.Object) *fake.FakeDynamicClient {
 	t.Helper()
@@ -283,7 +281,10 @@ func TestEvaluate_PreCheck_MissingFields(t *testing.T) {
 func TestSyncOnce_DesireNotFound(t *testing.T) {
 	ctx := context.Background()
 	crud := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
-	c := &DeleteDesireController{specFetcher: &deleteDesireSpecFetcher{reader: crud}}
+	c := &DeleteDesireController{
+		specFetcher:    &deleteDesireSpecFetcher{reader: crud},
+		completedCache: make(map[string]bool),
+	}
 
 	key := keys.DeleteDesireKey{ClusterID: "c1", Name: "cluster1--cm1"}
 	if err := c.SyncOnce(ctx, key); err != nil {
@@ -308,9 +309,10 @@ func TestSyncOnce_Success_TargetAbsent(t *testing.T) {
 		statusFetcher, &deleteDesireReplacer{crud: statusCRUD}, &deleteDesireCreator{crud: statusCRUD},
 	)
 	c := &DeleteDesireController{
-		specFetcher: &deleteDesireSpecFetcher{reader: specCRUD},
-		dyn:         dyn,
-		writer:      writer,
+		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
+		dyn:            dyn,
+		writer:         writer,
+		completedCache: make(map[string]bool),
 	}
 
 	key := mustKey(t, created)
@@ -383,6 +385,104 @@ func TestHandleUpdate_UnchangedConsultsCooldown(t *testing.T) {
 func TestDefaultCooldownPeriod_IsOneMinute(t *testing.T) {
 	if DefaultCooldownPeriod != 1*time.Minute {
 		t.Errorf("expected 1m, got %v", DefaultCooldownPeriod)
+	}
+}
+
+// --- CompletedCache Tests ---
+
+func TestPreloadCompletedCache_OnlyStoresSuccessfulTrue(t *testing.T) {
+	ctx := context.Background()
+	statusCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+
+	// Successful=True
+	dTrue := newDeleteDesire(t, "cm-true", configMapTarget("cm-true"))
+	dTrue.SetDocumentID("doc-true")
+	conditions.SetSuccessful(&dTrue.Status.Conditions, nil)
+	if _, err := statusCRUD.Create(ctx, dTrue); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Successful=False (WaitingForDeletion)
+	dFalse := newDeleteDesire(t, "cm-false", configMapTarget("cm-false"))
+	dFalse.SetDocumentID("doc-false")
+	conditions.SetSuccessfulWaitingForDeletion(&dFalse.Status.Conditions, metav1.Now(), "some-uid")
+	if _, err := statusCRUD.Create(ctx, dFalse); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// No conditions at all
+	dNone := newDeleteDesire(t, "cm-none", configMapTarget("cm-none"))
+	dNone.SetDocumentID("doc-none")
+	if _, err := statusCRUD.Create(ctx, dNone); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	c := &DeleteDesireController{completedCache: make(map[string]bool)}
+	if err := c.PreloadCompletedCache(ctx, statusCRUD); err != nil {
+		t.Fatalf("PreloadCompletedCache: %v", err)
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.completedCache["doc-true"] {
+		t.Error("expected doc-true to be in completedCache")
+	}
+	if c.completedCache["doc-false"] {
+		t.Error("expected doc-false NOT to be in completedCache")
+	}
+	if c.completedCache["doc-none"] {
+		t.Error("expected doc-none NOT to be in completedCache")
+	}
+}
+
+func TestSyncOnce_ShortCircuitsWhenInCompletedCache(t *testing.T) {
+	ctx := context.Background()
+
+	// specFetcher and dyn are nil — any call to them would panic, proving
+	// the short-circuit fires before either is touched.
+	c := &DeleteDesireController{
+		completedCache: map[string]bool{"cluster1--cm1": true},
+	}
+
+	key := keys.DeleteDesireKey{ClusterID: "cluster1", Name: "cluster1--cm1"}
+	if err := c.SyncOnce(ctx, key); err != nil {
+		t.Fatalf("SyncOnce should return nil for completed desire, got: %v", err)
+	}
+}
+
+func TestSyncOnce_PopulatesCompletedCacheOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	// Target configmap does not exist → evaluate returns Successful=True.
+	dyn := fakeDynamic(t, map[schema.GroupVersionResource]string{configMapGVR: "ConfigMapList"})
+
+	specCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+	statusCRUD := listertesting.NewFakeCRUD[kubeapplier.DeleteDesire, *kubeapplier.DeleteDesire]()
+	d := newDeleteDesire(t, "cm1", configMapTarget("cm1"))
+	created, err := specCRUD.Create(ctx, d)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	statusFetcher := &deleteDesireStatusFetcher{crud: statusCRUD}
+	writer := desirestatuswriter.New[kubeapplier.DeleteDesire, keys.DeleteDesireKey, *kubeapplier.DeleteDesire](
+		statusFetcher, &deleteDesireReplacer{crud: statusCRUD}, &deleteDesireCreator{crud: statusCRUD},
+	)
+	c := &DeleteDesireController{
+		specFetcher:    &deleteDesireSpecFetcher{reader: specCRUD},
+		dyn:            dyn,
+		writer:         writer,
+		completedCache: make(map[string]bool),
+	}
+
+	key := mustKey(t, created)
+	if err := c.SyncOnce(ctx, key); err != nil {
+		t.Fatalf("SyncOnce: %v", err)
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.completedCache[created.GetDocumentID()] {
+		t.Errorf("expected documentID %q to be in completedCache after successful delete", created.GetDocumentID())
 	}
 }
 

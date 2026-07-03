@@ -163,13 +163,18 @@ func (o *Options) runControllersUnderLeaderElection(
 				logger.Info("acquired leader election lease; starting informers and controllers")
 				go o.Informers.RunWithContext(ctx)
 
-				if !cache.WaitForCacheSync(ctx.Done(),
-					applyInformer.HasSynced, deleteInformer.HasSynced, readInformer.HasSynced) {
-					logger.Info("informer caches did not sync; aborting controller startup")
-					return
-				}
+			if !cache.WaitForCacheSync(ctx.Done(),
+				applyInformer.HasSynced, deleteInformer.HasSynced, readInformer.HasSynced) {
+				logger.Info("informer caches did not sync; aborting controller startup")
+				return
+			}
 
-				go applyCtl.Run(ctx, threadsApply)
+			if err := deleteCtl.PreloadCompletedCache(ctx, o.KubeApplierDBClient.DeleteDesireStatus()); err != nil {
+				logger.Error(err, "failed to preload delete desire completed cache; aborting controller startup")
+				return
+			}
+
+			go applyCtl.Run(ctx, threadsApply)
 				go deleteCtl.Run(ctx, threadsDelete)
 				go readMgr.Run(ctx, threadsReadManager)
 			},
