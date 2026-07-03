@@ -202,6 +202,7 @@ func (c *DeleteDesireController) processNext(ctx context.Context) bool {
 // GETs for deletes that finished before (or during a previous run of) this
 // process. Returns a fatal error if the status table cannot be listed.
 func (c *DeleteDesireController) PreloadCompletedCache(ctx context.Context, statusReader database.ResourceCRUD[kubeapplier.DeleteDesire]) error {
+	logger := klog.FromContext(ctx).WithName(c.name)
 	items, err := statusReader.List(ctx)
 	if err != nil {
 		return fmt.Errorf("listing delete desire statuses for completed cache preload: %w", err)
@@ -214,6 +215,7 @@ func (c *DeleteDesireController) PreloadCompletedCache(ctx context.Context, stat
 			c.completedCache[item.GetDocumentID()] = true
 		}
 	}
+	logger.Info("preloaded completed cache", "total", len(items), "completed", len(c.completedCache))
 	return nil
 }
 
