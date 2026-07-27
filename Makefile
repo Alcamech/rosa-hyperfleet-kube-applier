@@ -70,16 +70,13 @@ KIND_KUBECONFIG ?= $(HOME)/.kube/config
 
 test: test-unit test-integration
 
-# Run vet first to warm the build cache and avoid concurrent vet subprocess
-# crashes (SIGBUS in the Go telemetry mmap) when go test spawns many parallel
-# vet workers against a cold cache.
-test-unit: vet
+test-unit:
 	GOTELEMETRY=off go test -vet=off -race -count=1 ./...
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers
 # and clusters are reused. Use 'make infra-down' to tear everything down.
-test-integration: vet infra-up
+test-integration: infra-up
 	GOTELEMETRY=off \
 	LOCALSTACK_ENDPOINT=http://localhost:$(LOCALSTACK_PORT) \
 	KUBECONFIG=$(KIND_KUBECONFIG) \
