@@ -1,6 +1,6 @@
 .PHONY: help build desire-tool desirectl \
 	test test-unit test-integration \
-	fmt vet \
+	fmt vet verify \
 	image image-push \
 	infra-up infra-down localstack kind-setup \
 	run-local clean
@@ -37,6 +37,7 @@ help:
 	@echo "Code Quality:"
 	@echo "  fmt              go fmt on all packages"
 	@echo "  vet              go vet on all packages"
+	@echo "  verify           go mod tidy + check for drift"
 	@echo ""
 	@echo "Images:"
 	@echo "  image            Build container image (podman or docker)"
@@ -67,12 +68,13 @@ desirectl:
 test: test-unit test-integration
 
 test-unit:
-	go test ./... -count=1
+	GOTELEMETRY=off go test ./... -count=1
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers
 # and clusters are reused. Use 'make infra-down' to tear everything down.
 test-integration: infra-up
+	GOTELEMETRY=off \
 	LOCALSTACK_ENDPOINT=http://localhost:$(LOCALSTACK_PORT) \
 	go test ./test/integration/... -v -count=1 -timeout 120s
 
@@ -83,6 +85,10 @@ fmt:
 
 vet:
 	go vet ./...
+
+verify:
+	go mod tidy
+	git diff --exit-code go.mod go.sum
 
 # ── Images ───────────────────────────────────────────────────────────────
 
