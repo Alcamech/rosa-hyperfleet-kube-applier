@@ -64,7 +64,7 @@ desire-tool:
 desirectl:
 	go build -o desirectl ./cmd/desirectl
 
-KIND_KUBECONFIG ?= $(HOME)/.kube/config
+KIND_KUBECONFIG ?= /tmp/$(KIND_CLUSTER_NAME).kubeconfig
 
 # ── Test ─────────────────────────────────────────────────────────────────
 
@@ -122,6 +122,7 @@ localstack:
 
 kind-setup:
 	KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
+	KIND_KUBECONFIG=$(KIND_KUBECONFIG) \
 	./hack/setup-kind.sh
 
 run-local:
