@@ -68,7 +68,7 @@ desirectl:
 test: test-unit test-integration
 
 test-unit:
-	GOTELEMETRY=off go test ./... -count=1
+	GOTELEMETRY=off go test -race -count=1 ./...
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers
@@ -76,7 +76,7 @@ test-unit:
 test-integration: infra-up
 	GOTELEMETRY=off \
 	LOCALSTACK_ENDPOINT=http://localhost:$(LOCALSTACK_PORT) \
-	go test ./test/integration/... -v -count=1 -timeout 120s
+	go test -race -v -count=1 -timeout 120s ./test/integration/...
 
 # ── Code Quality ─────────────────────────────────────────────────────────
 
