@@ -33,6 +33,7 @@ help:
 	@echo "  test             All tests (unit + integration)"
 	@echo "  test-unit        Unit tests (no external services)"
 	@echo "  test-integration Integration tests (starts LocalStack + Kind if needed)"
+	@echo "                   Override kubeconfig with KIND_KUBECONFIG=/path/to/config"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  fmt              go fmt on all packages"
@@ -63,20 +64,26 @@ desire-tool:
 desirectl:
 	go build -o desirectl ./cmd/desirectl
 
+KIND_KUBECONFIG ?= $(HOME)/.kube/config
+
 # ── Test ─────────────────────────────────────────────────────────────────
 
 test: test-unit test-integration
 
-test-unit:
-	GOTELEMETRY=off go test -race -count=1 ./...
+# Run vet first to warm the build cache and avoid concurrent vet subprocess
+# crashes (SIGBUS in the Go telemetry mmap) when go test spawns many parallel
+# vet workers against a cold cache.
+test-unit: vet
+	GOTELEMETRY=off go test -vet=off -race -count=1 ./...
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers
 # and clusters are reused. Use 'make infra-down' to tear everything down.
-test-integration: infra-up
+test-integration: vet infra-up
 	GOTELEMETRY=off \
 	LOCALSTACK_ENDPOINT=http://localhost:$(LOCALSTACK_PORT) \
-	go test -race -v -count=1 -timeout 120s ./test/integration/...
+	KUBECONFIG=$(KIND_KUBECONFIG) \
+	go test -vet=off -race -v -count=1 -timeout 120s ./test/integration/...
 
 # ── Code Quality ─────────────────────────────────────────────────────────
 
