@@ -78,7 +78,7 @@ test-unit:
 # and clusters are reused. Use 'make infra-down' to tear everything down.
 test-integration: infra-up
 	GOTELEMETRY=off \
-	LOCALSTACK_ENDPOINT=http://localhost:$(LOCALSTACK_PORT) \
+	LOCALSTACK_ENDPOINT=http://127.0.0.1:$(LOCALSTACK_PORT) \
 	KUBECONFIG=$(KIND_KUBECONFIG) \
 	go test -vet=off -race -v -count=1 -timeout 120s ./test/integration/...
 
