@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # start-localstack.sh — starts a LocalStack container with DynamoDB and
 # DynamoDB Streams enabled in detached mode.
-# Usage: ./hack/start-localstack.sh
-# The container runs detached. Use 'docker stop localstack-kube-applier-aws'
-# to stop it.
 #
-# DynamoDB is available in the free community image (localstack/localstack).
-# If LOCALSTACK_AUTH_TOKEN is set the Pro image is used instead, which adds
-# extra services — not required for these tests.
+# Usage: ./hack/start-localstack.sh
+#
+# Environment variables:
+#   CONTAINER_ENGINE      podman or docker (auto-detected if unset)
+#   LOCALSTACK_PORT       host port to expose LocalStack on (default: 4566)
+#   LOCALSTACK_AUTH_TOKEN set to use the Pro image; community image used otherwise
+#
+# Idempotent: if the container is already running and healthy on the expected
+# port it is reused without restart. A stopped/dead container is replaced.
+#
+# Stop with: <docker|podman> stop localstack-kube-applier-aws
 
 set -euo pipefail
 
+CONTAINER_ENGINE="${CONTAINER_ENGINE:-$(command -v podman 2>/dev/null || command -v docker 2>/dev/null)}"
 CONTAINER_NAME="localstack-kube-applier-aws"
 PORT="${LOCALSTACK_PORT:-4566}"
 
@@ -22,11 +28,17 @@ else
   AUTH_ARGS=()
 fi
 
-# Remove any stale container with the same name.
-docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+# Check if the container is already running and healthy — if so, reuse it.
+if "${CONTAINER_ENGINE}" inspect "${CONTAINER_NAME}" --format '{{.State.Status}}' 2>/dev/null | grep -q "^running$"; then
+  echo "LocalStack container '${CONTAINER_NAME}' is already running on port ${PORT}, reusing."
+  exit 0
+fi
+
+# Remove any stale (stopped/dead/exited) container with the same name.
+"${CONTAINER_ENGINE}" rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
 echo "Starting ${IMAGE} on port ${PORT} (detached) ..."
-docker run -d \
+"${CONTAINER_ENGINE}" run -d \
   --name "${CONTAINER_NAME}" \
   -p "${PORT}:4566" \
   -e "SERVICES=dynamodb,dynamodbstreams" \
@@ -36,4 +48,4 @@ docker run -d \
 
 echo "LocalStack container '${CONTAINER_NAME}' started."
 echo "Set LOCALSTACK_ENDPOINT=http://localhost:${PORT} before running integration tests."
-echo "Stop with: docker stop ${CONTAINER_NAME}"
+echo "Stop with: ${CONTAINER_ENGINE} stop ${CONTAINER_NAME}"
