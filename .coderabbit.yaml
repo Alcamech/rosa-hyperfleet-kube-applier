@@ -1,0 +1,43 @@
+language: en-US
+reviews:
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+    ignore_title_keywords:
+      - WIP
+      - deps
+      - "Do Not Merge"
+  path_filters:
+    - "!**/*.md"
+    - "!**/*.txt"
+    - "!**/go.sum"
+    - "!**/vendor/**"
+  path_instructions:
+    - path: "cmd/**"
+      instructions: |
+        Review CLI commands for consistent UX patterns, proper error handling,
+        and safe AWS client usage.
+    - path: "internal/**"
+      instructions: |
+        Review internal packages for Go best practices, proper error wrapping,
+        and clear separation between controllers, AWS integrations, and service logic.
+    - path: "pkg/**"
+      instructions: |
+        Review shared packages for stable interfaces, encapsulation, and
+        backward compatibility.
+    - path: "ci/**"
+      instructions: |
+        Review CI scripts for parity with Makefile targets (lint, test, verify)
+        and safe shell usage.
+    - path: "Containerfile*"
+      instructions: |
+        Review container images for minimal base images, no unnecessary tools,
+        non-root execution where possible, and proper layer caching.
+chat:
+  auto_reply: true
