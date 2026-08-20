@@ -705,7 +705,7 @@ func TestIntegration_PollerDetectsNewSpec(t *testing.T) {
 			context.Background(), cmName, metav1.DeleteOptions{})
 	})
 
-	// Wait for the app to stabilise (initial relist completes, nothing found).
+	// Wait for the app to stabilize (initial relist completes, nothing found).
 	// startupRelistDelay=500ms + relist ticker fires after relistInterval=10s.
 	// Give it 15s to be safely past the first relist with an empty result.
 	time.Sleep(15 * time.Second)

@@ -34,7 +34,7 @@ sequenceDiagram
     participant DBT as DynamoDB status table
 
     HF->>DBS: PutItem (ReadDesire spec)
-    DBS-->>MGR: Streams event (~2 s)
+    DBS-->>MGR: GSI poll event (≤15 s)
     MGR->>DBS: GetItem (re-read spec)
     MGR->>KUB: spawn (or restart) per-instance controller
     KUB->>API: List + Watch (field selector: name=target)

@@ -16,7 +16,7 @@ runs in the RC account as part of the MC onboarding pipeline.
 
 | Module | Location | Purpose |
 |---|---|---|
-| `kube-applier-dynamodb` | `terraform/modules/kube-applier-dynamodb/` | Declares the 6 DynamoDB tables and cross-account resource-based policies |
+| `kube-applier-dynamodb` | `terraform/modules/kube-applier-dynamodb/` | Declares the 4 DynamoDB tables, `updateTime-index` GSI, and cross-account resource-based policies |
 | Top-level config | `terraform/config/kube-applier-dynamodb-provisioning/` | Calls the module; one invocation per MC |
 
 **Pipeline integration:**
@@ -43,15 +43,17 @@ or pass `IS_DESTROY=true` to the CodeBuild job.
 **Table naming:**
 
 ```
-{mc}-specs-applydesires    (Streams: NEW_AND_OLD_IMAGES)
-{mc}-specs-deletedesires   (Streams: NEW_AND_OLD_IMAGES)
-{mc}-specs-readdesires     (Streams: NEW_AND_OLD_IMAGES)
+{mc}-specs-applydesires    (GSI: updateTime-index)
+{mc}-specs-readdesires     (GSI: updateTime-index)
 {mc}-status-applydesires
-{mc}-status-deletedesires
 {mc}-status-readdesires
 ```
 
-Partition key is `documentID` (string) in every table. No sort keys or GSIs.
+Partition key is `documentID` (string) in every table. The specs tables carry a
+`updateTime-index` GSI (hash key: `shard`, range key: `updateTime`) used by
+the two-speed polling watcher. DynamoDB Streams are not enabled. Deletion is
+modelled as `ApplyDesire` with `spec.type=Delete` — there are no separate
+`deletedesires` tables.
 
 ### IAM
 
@@ -65,12 +67,12 @@ Managed by `terraform/modules/kube-applier/` (called per MC in the MC account).
 
 **Trust policy:** `pods.eks.amazonaws.com` (EKS Pod Identity)
 
-**Inline policy — specs (read + Streams):**
+**Inline policy — specs (read + GSI query):**
 
 | Action | Resource |
 |---|---|
-| `dynamodb:GetItem`, `Scan`, `Query` | `arn:aws:dynamodb:{region}:{rc-account}:table/{mc}-specs-*` |
-| `dynamodb:DescribeStream`, `GetRecords`, `GetShardIterator`, `ListStreams` | `arn:aws:dynamodb:{region}:{rc-account}:table/{mc}-specs-*` and `.../stream/*` |
+| `dynamodb:GetItem`, `Scan`, `Query`, `BatchGetItem` | `arn:aws:dynamodb:{region}:{rc-account}:table/{mc}-specs-*` |
+| `dynamodb:Query` | `arn:aws:dynamodb:{region}:{rc-account}:table/{mc}-specs-*/index/*` |
 
 **Inline policy — status (read-write):**
 
@@ -154,9 +156,10 @@ ServiceAccount via a `ClusterRoleBinding`.
 | `coordination.k8s.io` | `leases` | `get`, `create`, `update`, `patch`, `delete`, `list`, `watch` |
 | `""` | `events` | `create`, `patch` |
 
-The wildcard rule is required because `ApplyDesire` and `DeleteDesire` can
-target any resource type. `leases` are used for leader election in the
-`kube-applier` namespace. `events` are used for controller status reporting.
+The wildcard rule is required because `ApplyDesire` can target any resource
+type (including deletion via `spec.type=Delete`). `leases` are used for leader
+election in the `kube-applier` namespace. `events` are used for controller
+status reporting.
 
 ---
 
