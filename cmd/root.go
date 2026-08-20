@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/informers"
+	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/app"
 )
 
@@ -36,6 +38,11 @@ type KubeApplierRootCmdFlags struct {
 	ExitOnPanic                bool
 	KubeQPS                    float32
 	KubeBurst                  int
+	// DynamoDB watcher tuning — zero values use the package defaults
+	// (15s poll, 5m relist, max lookback = relist interval).
+	WatcherPollInterval     time.Duration
+	WatcherRelistInterval   time.Duration
+	WatcherMaxLookback      time.Duration
 }
 
 func (f *KubeApplierRootCmdFlags) AddFlags(cmd *cobra.Command) {
@@ -67,6 +74,12 @@ func (f *KubeApplierRootCmdFlags) AddFlags(cmd *cobra.Command) {
 		"Maximum QPS to the kube-apiserver from the dynamic client.")
 	cmd.Flags().IntVar(&f.KubeBurst, "kube-burst", f.KubeBurst,
 		"Maximum burst for throttle on requests to the kube-apiserver from the dynamic client.")
+	cmd.Flags().DurationVar(&f.WatcherPollInterval, "dynamo-poll-interval", f.WatcherPollInterval,
+		"How often the DynamoDB GSI fast poller runs (0 uses the default: 15s).")
+	cmd.Flags().DurationVar(&f.WatcherRelistInterval, "dynamo-relist-interval", f.WatcherRelistInterval,
+		"How often the DynamoDB full consistent relist runs (0 uses the default: 5m).")
+	cmd.Flags().DurationVar(&f.WatcherMaxLookback, "dynamo-max-lookback", f.WatcherMaxLookback,
+		"Maximum lookback window for the GSI fast poller (0 defaults to --dynamo-relist-interval).")
 
 	for _, name := range []string{"namespace", "management-cluster", "aws-region"} {
 		if err := cmd.MarkFlagRequired(name); err != nil {
@@ -127,10 +140,19 @@ func (f *KubeApplierRootCmdFlags) ToKubeApplierOptions(ctx context.Context) (*ap
 
 	specsClient := app.NewDynamoDBClient(awsCfg)
 	statusClient := app.NewDynamoDBClient(awsCfg)
-	streamsClient := app.NewDynamoDBStreamsClient(awsCfg)
 
 	dbClient := database.NewDynamoDBKubeApplierDBClient(specsClient, statusClient, specsPrefix, statusPrefix)
-	dynamoDBInformers := informers.NewKubeApplierInformers(specsClient, streamsClient, specsPrefix)
+	dynamoDBInformers := informers.NewKubeApplierInformersWithOptions(
+		specsClient,
+		specsPrefix,
+		informers.DefaultResyncPeriod,
+		hd.Options{
+			PollInterval:      f.WatcherPollInterval,
+			RelistInterval:    f.WatcherRelistInterval,
+			MaxLookbackWindow: f.WatcherMaxLookback,
+			Logger:            klog.Background(),
+		},
+	)
 
 	dyn, err := app.NewDynamicClient(kubeconfig, f.KubeQPS, f.KubeBurst)
 	if err != nil {

@@ -61,13 +61,23 @@ func createTable(t *testing.T, dbClient *dynamodb.Client, tableName string) {
 		BillingMode: dbtypes.BillingModePayPerRequest,
 		AttributeDefinitions: []dbtypes.AttributeDefinition{
 			{AttributeName: aws.String("documentID"), AttributeType: dbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("shard"), AttributeType: dbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("updateTime"), AttributeType: dbtypes.ScalarAttributeTypeS},
 		},
 		KeySchema: []dbtypes.KeySchemaElement{
 			{AttributeName: aws.String("documentID"), KeyType: dbtypes.KeyTypeHash},
 		},
-		StreamSpecification: &dbtypes.StreamSpecification{
-			StreamEnabled:  aws.Bool(true),
-			StreamViewType: dbtypes.StreamViewTypeNewAndOldImages,
+		GlobalSecondaryIndexes: []dbtypes.GlobalSecondaryIndex{
+			{
+				IndexName: aws.String("updateTime-index"),
+				KeySchema: []dbtypes.KeySchemaElement{
+					{AttributeName: aws.String("shard"), KeyType: dbtypes.KeyTypeHash},
+					{AttributeName: aws.String("updateTime"), KeyType: dbtypes.KeyTypeRange},
+				},
+				Projection: &dbtypes.Projection{
+					ProjectionType: dbtypes.ProjectionTypeAll,
+				},
+			},
 		},
 	})
 	if err != nil {

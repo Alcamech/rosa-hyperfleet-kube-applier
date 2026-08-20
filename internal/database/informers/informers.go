@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
-	streamtypes "github.com/aws/aws-sdk-go-v2/service/dynamodbstreams/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -16,9 +14,10 @@ import (
 	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/listers"
+	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 )
 
-const defaultResyncPeriod = 30 * time.Second
+const DefaultResyncPeriod = 30 * time.Second
 
 type KubeApplierInformers interface {
 	ApplyDesires() (cache.SharedIndexInformer, listers.ApplyDesireLister)
@@ -34,36 +33,41 @@ type kubeApplierInformers struct {
 }
 
 // NewKubeApplierInformers creates informers that watch the specs DynamoDB
-// tables for desire document changes. specsClient is the DynamoDB client for
-// the specs tables; streamsClient is the DynamoDB Streams client used for
-// change notification. specsPrefix is the table name prefix (full table names
-// are prefix + "-applydesires" / "-readdesires").
+// tables for desire document changes via GSI-based polling (two-speed engine).
+// specsClient is the DynamoDB client for the specs tables.
+// specsPrefix is the table name prefix (full table names are
+// prefix+"-applydesires" / prefix+"-readdesires").
 func NewKubeApplierInformers(
 	specsClient *dynamodb.Client,
-	streamsClient *dynamodbstreams.Client,
 	specsPrefix string,
 ) KubeApplierInformers {
-	return NewKubeApplierInformersWithResyncPeriod(specsClient, streamsClient, specsPrefix, defaultResyncPeriod)
+	return NewKubeApplierInformersWithResyncPeriod(specsClient, specsPrefix, DefaultResyncPeriod)
 }
 
 func NewKubeApplierInformersWithResyncPeriod(
 	specsClient *dynamodb.Client,
-	streamsClient *dynamodbstreams.Client,
 	specsPrefix string,
 	resyncPeriod time.Duration,
+) KubeApplierInformers {
+	return NewKubeApplierInformersWithOptions(specsClient, specsPrefix, resyncPeriod, hd.Options{})
+}
+
+// NewKubeApplierInformersWithOptions is like NewKubeApplierInformersWithResyncPeriod
+// but also accepts explicit watcher Options (poll/relist intervals). Primarily
+// useful for integration tests that need tighter polling intervals.
+func NewKubeApplierInformersWithOptions(
+	specsClient *dynamodb.Client,
+	specsPrefix string,
+	resyncPeriod time.Duration,
+	watcherOpts hd.Options,
 ) KubeApplierInformers {
 	applyTable := specsPrefix + database.TableSuffixApplyDesires
 	readTable := specsPrefix + database.TableSuffixReadDesires
 
 	applyInf := newDesireInformer(
 		specsClient,
-		streamsClient,
 		applyTable,
 		&kubeapplier.ApplyDesire{},
-		func(item map[string]streamtypes.AttributeValue) (runtime.Object, error) {
-			// Convert stream image attributes to dynamodb/types.AttributeValue.
-			return database.ItemToApplyDesire(streamImageToDynamoDBItem(item))
-		},
 		func(ctx context.Context) (runtime.Object, error) {
 			specReader := database.NewDynamoDBKubeApplierDBClient(specsClient, specsClient, specsPrefix, specsPrefix).ApplyDesireSpecs()
 			items, err := specReader.List(ctx)
@@ -77,17 +81,17 @@ func NewKubeApplierInformersWithResyncPeriod(
 			}
 			return list, nil
 		},
+		func(item hd.Item) (runtime.Object, error) {
+			return database.ItemToApplyDesire(item)
+		},
 		resyncPeriod,
+		watcherOpts,
 	)
 
 	readInf := newDesireInformer(
 		specsClient,
-		streamsClient,
 		readTable,
 		&kubeapplier.ReadDesire{},
-		func(item map[string]streamtypes.AttributeValue) (runtime.Object, error) {
-			return database.ItemToReadDesire(streamImageToDynamoDBItem(item))
-		},
 		func(ctx context.Context) (runtime.Object, error) {
 			specReader := database.NewDynamoDBKubeApplierDBClient(specsClient, specsClient, specsPrefix, specsPrefix).ReadDesireSpecs()
 			items, err := specReader.List(ctx)
@@ -101,7 +105,11 @@ func NewKubeApplierInformersWithResyncPeriod(
 			}
 			return list, nil
 		},
+		func(item hd.Item) (runtime.Object, error) {
+			return database.ItemToReadDesire(item)
+		},
 		resyncPeriod,
+		watcherOpts,
 	)
 
 	return &kubeApplierInformers{
@@ -114,23 +122,23 @@ func NewKubeApplierInformersWithResyncPeriod(
 
 func newDesireInformer(
 	dbClient *dynamodb.Client,
-	streamsClient *dynamodbstreams.Client,
 	tableName string,
 	exampleObj runtime.Object,
-	streamConvertFn func(map[string]streamtypes.AttributeValue) (runtime.Object, error),
 	listFn func(context.Context) (runtime.Object, error),
+	decodeFn func(hd.Item) (runtime.Object, error),
 	resyncPeriod time.Duration,
+	watcherOpts hd.Options,
 ) cache.SharedIndexInformer {
 	lw := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, _ metav1.ListOptions) (runtime.Object, error) {
 			return listFn(ctx)
 		},
 		WatchFuncWithContext: func(ctx context.Context, _ metav1.ListOptions) (watch.Interface, error) {
-			return newDynamoDBStreamWatcher(ctx, dbClient, streamsClient, tableName, streamConvertFn), nil
+			return hd.NewWatchAdapter(ctx, dbClient, tableName, watcherOpts, decodeFn), nil
 		},
 	}
 	return cache.NewSharedIndexInformerWithOptions(
-		&listWatchWithoutWatchListSemantics{lw},
+		hd.ListWatchWithoutWatchListSemantics{ListWatch: lw},
 		exampleObj,
 		cache.SharedIndexInformerOptions{
 			ResyncPeriod: resyncPeriod,
