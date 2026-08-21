@@ -7,20 +7,36 @@
 //
 //   - Fast poll loop (every PollInterval, default 15s): queries the
 //     updateTime-index GSI across all shard buckets in parallel, deduplicates
-//     results against the cache using updateTime, and emits doorbell callbacks
-//     for changed document IDs.
+//     results against the cache using updateTime, fetches full item attribute
+//     maps via BatchGetItem for changed documents, and delivers them via
+//     OnChange(docID string, item Item).
 //
 //   - Full relist loop (every RelistInterval, default 5m): performs a
-//     consistent full-table Scan, diffs the result against the cache to detect
-//     additions, modifications, and deletions, and emits doorbell callbacks.
-//     Resets the expanding lookback window (see below).
+//     consistent full-table Scan (no ProjectionExpression — all attributes),
+//     diffs the result against the cache to detect additions, modifications,
+//     and hard deletions, and delivers full items via OnChange. For hard
+//     deletes, item is nil. Resets the expanding lookback window (see below).
 //
-// # Doorbell Contract
+// # OnChange Contract
 //
-// The watcher delivers only documentID strings. It never fetches or delivers
-// full item content. Consumers are responsible for performing their own
-// consistent GetItem after receiving a doorbell. This avoids double-reads and
-// ensures consumers always act on strongly-consistent data.
+// OnChange is called with the full DynamoDB attribute map for the item:
+//
+//	type OnChange func(documentID string, item Item)
+//
+// item is nil only for hard deletes detected during a full relist (items that
+// have disappeared from the table entirely). Fast-poll events always carry a
+// non-nil item because BatchGetItem is used to fetch the full record.
+//
+// Consumers decide how to use the item:
+//
+//   - kube-applier-aws: the WatchAdapter passes item through decodeFn to
+//     produce a typed runtime.Object (*ApplyDesire or *ReadDesire) and emits
+//     a watch.Modified/Deleted event to the SharedIndexInformer.
+//
+//   - hyperfleet-operator: statusstream.Manager ignores item and dispatches
+//     only documentID to the EventRouter, which enqueues a GenericEvent to
+//     the controller workqueue. The controller performs its own consistent
+//     GetItem when it reconciles.
 //
 // # Expanding Lookback Window
 //
@@ -42,16 +58,6 @@
 // (GSIShardCount=4) MUST match the Terraform definition in
 // rosa-hyperfleet/terraform/modules/kube-applier-dynamodb/main.tf.
 //
-// # Consumers
-//
-// Two consumers use this package:
-//
-//   - hyperfleet-operator: statusstream.Manager creates one Watcher per
-//     (ManagementCluster, table-suffix) pair. The OnChange callback calls
-//     EventRouter.Dispatch(documentID), which enqueues a GenericEvent to the
-//     controller workqueue.
-//
-//   - kube-applier-aws: informers.go creates a WatchAdapter wrapping a Watcher
-//     per specs table. The WatchAdapter implements watch.Interface for the
-//     SharedIndexInformer.
+// Items must have shard and updateTime attributes set at write time for the
+// fast poller to see them.
 package dynamodb

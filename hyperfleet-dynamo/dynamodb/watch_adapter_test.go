@@ -6,9 +6,27 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+// testDecodeFn is a minimal decodeFn that returns a PartialObjectMetadata
+// keyed by documentID. Used in WatchAdapter tests where the exact object type
+// does not matter — only that a correctly-typed non-nil object is emitted.
+func testDecodeFn(item Item) (runtime.Object, error) {
+	docID := ""
+	if v, ok := item["documentID"]; ok {
+		if s, ok := v.(*types.AttributeValueMemberS); ok {
+			docID = s.Value
+		}
+	}
+	return &metav1.PartialObjectMetadata{
+		ObjectMeta: metav1.ObjectMeta{Name: docID},
+	}, nil
+}
 
 func TestListWatchWithoutWatchListSemantics_IsUnsupported(t *testing.T) {
 	lw := ListWatchWithoutWatchListSemantics{ListWatch: &cache.ListWatch{}}
@@ -17,14 +35,12 @@ func TestListWatchWithoutWatchListSemantics_IsUnsupported(t *testing.T) {
 	}
 }
 
-// TestWatchAdapter_DeliversDoorbell verifies that an OnChange callback from
-// the underlying Watcher is translated into a watch.Event on ResultChan with:
-//   - Type == watch.Modified
-//   - Object is *metav1.PartialObjectMetadata with Name == documentID
-func TestWatchAdapter_DeliversDoorbell(t *testing.T) {
+// TestWatchAdapter_DeliversModified verifies that an OnChange callback from
+// the underlying Watcher is translated into a watch.Modified event on
+// ResultChan carrying a correctly-typed runtime.Object.
+func TestWatchAdapter_DeliversModified(t *testing.T) {
 	fd := newFakeDynamo()
-	// First relist finds one item so onChange fires.
-	fd.setScanItems(stubItems(map[string]time.Time{"doorbell-doc": t1}))
+	fd.setScanItems(stubItems(map[string]time.Time{"doc-a": t1}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -32,15 +48,15 @@ func TestWatchAdapter_DeliversDoorbell(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
+		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
-	})
+	}, testDecodeFn)
 	defer adapter.Stop()
 
-	// Wait for a watch event.
 	select {
 	case evt, ok := <-adapter.ResultChan():
 		if !ok {
-			t.Fatal("ResultChan closed before receiving doorbell event")
+			t.Fatal("ResultChan closed before receiving event")
 		}
 		if evt.Type != watch.Modified {
 			t.Errorf("event type: got %v, want %v", evt.Type, watch.Modified)
@@ -49,20 +65,19 @@ func TestWatchAdapter_DeliversDoorbell(t *testing.T) {
 		if !ok {
 			t.Fatalf("event object: got %T, want *metav1.PartialObjectMetadata", evt.Object)
 		}
-		if pom.Name != "doorbell-doc" {
-			t.Errorf("event object name: got %q, want %q", pom.Name, "doorbell-doc")
+		if pom.Name != "doc-a" {
+			t.Errorf("event object name: got %q, want %q", pom.Name, "doc-a")
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for doorbell event on ResultChan")
+		t.Fatal("timed out waiting for Modified event on ResultChan")
 	}
 }
 
-// TestWatchAdapter_ResultChanClosesAfterRelistDone verifies that after the
-// Watcher's Done() channel closes (first relist complete), the WatchAdapter's
-// Run goroutine exits and closes resultCh — signalling the Reflector to relist.
-func TestWatchAdapter_ResultChanClosesAfterRelistDone(t *testing.T) {
+// TestWatchAdapter_ResultChanClosesOnCtxCancel verifies that cancelling the
+// context causes the WatchAdapter's Run goroutine to exit and close resultCh.
+func TestWatchAdapter_ResultChanClosesOnCtxCancel(t *testing.T) {
 	fd := newFakeDynamo()
-	fd.setScanItems(nil) // empty table — relist fires immediately, Done closes
+	fd.setScanItems(nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -70,20 +85,22 @@ func TestWatchAdapter_ResultChanClosesAfterRelistDone(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
+		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
-	})
+	}, testDecodeFn)
 
-	// Drain the channel until it closes.
+	// Cancel the context to drive Run to exit.
+	cancel()
+
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
 		case _, ok := <-adapter.ResultChan():
 			if !ok {
-				// Channel closed — correct.
-				return
+				return // channel closed as expected
 			}
 		case <-deadline:
-			t.Fatal("ResultChan was not closed within 3s after Done()")
+			t.Fatal("ResultChan was not closed within 3s after ctx cancel")
 		}
 	}
 }
@@ -100,11 +117,10 @@ func TestWatchAdapter_Stop_ClosesResultChan(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
+		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
-	})
+	}, testDecodeFn)
 
-	// Wait for first relist then Stop.
-	// We observe resultCh close — either from Done() or Stop(), both are valid.
 	adapter.Stop()
 
 	deadline := time.After(3 * time.Second)
@@ -117,29 +133,5 @@ func TestWatchAdapter_Stop_ClosesResultChan(t *testing.T) {
 		case <-deadline:
 			t.Fatal("ResultChan not closed within 3s after Stop()")
 		}
-	}
-}
-
-// TestWatchAdapter_DoorbellObjectName verifies doorbellObject() produces a
-// PartialObjectMetadata with the correct Name field.
-func TestWatchAdapter_DoorbellObjectName(t *testing.T) {
-	obj := doorbellObject("my-doc-id")
-	pom, ok := obj.(*metav1.PartialObjectMetadata)
-	if !ok {
-		t.Fatalf("doorbellObject returned %T, want *metav1.PartialObjectMetadata", obj)
-	}
-	if pom.Name != "my-doc-id" {
-		t.Errorf("Name = %q, want %q", pom.Name, "my-doc-id")
-	}
-}
-
-// TestWatchAdapter_DoorbellObjectUpdateTimeIsZero verifies that the
-// PartialObjectMetadata from doorbellObject has a zero CreationTimestamp —
-// the IsZero() check used by controllers to identify doorbell events.
-func TestWatchAdapter_DoorbellObjectUpdateTimeIsZero(t *testing.T) {
-	obj := doorbellObject("any-doc")
-	pom := obj.(*metav1.PartialObjectMetadata)
-	if !pom.CreationTimestamp.IsZero() {
-		t.Error("doorbell PartialObjectMetadata should have zero CreationTimestamp")
 	}
 }

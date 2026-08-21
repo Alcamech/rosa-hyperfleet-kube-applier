@@ -46,6 +46,12 @@ type Options struct {
 	// Defaults to GSIShardCount (4).
 	ShardCount int
 
+	// StartupDelay is the pause between starting the relist goroutine and the
+	// fast poll goroutine, giving the first relist time to seed the cache
+	// before fast polls begin. Defaults to startupRelistDelay (500ms).
+	// Set to a small value in tests to avoid slow startup.
+	StartupDelay time.Duration
+
 	// Logger is used for structured logging. If the zero value is passed,
 	// logr.Discard() is used. Callers should pass klog.Background() (kube-applier)
 	// or ctrl.Log (operator) so logs flow through the standard k8s logging pipeline.
@@ -79,6 +85,13 @@ func (o Options) shardCount() int {
 		return GSIShardCount
 	}
 	return o.ShardCount
+}
+
+func (o Options) startupDelay() time.Duration {
+	if o.StartupDelay <= 0 {
+		return startupRelistDelay
+	}
+	return o.StartupDelay
 }
 
 func (o Options) logger() logr.Logger {
@@ -166,7 +179,7 @@ func (w *Watcher) Run(ctx context.Context) {
 	case <-w.stopCh:
 		<-relistDone
 		return
-	case <-time.After(startupRelistDelay):
+	case <-time.After(w.opts.startupDelay()):
 	}
 
 	go func() {

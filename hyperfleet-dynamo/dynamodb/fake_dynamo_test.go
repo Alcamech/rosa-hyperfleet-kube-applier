@@ -1,9 +1,9 @@
 package dynamodb
 
 // fakeDynamo provides a round-trip fake for the DynamoDB HTTP API used in
-// unit tests. It intercepts Scan and Query calls and returns configurable
-// JSON responses so that ScanAll, QuerySince, and the full Watcher engine can
-// be tested without a real AWS endpoint or LocalStack.
+// unit tests. It intercepts Scan, Query, and BatchGetItem calls and returns
+// configurable JSON responses so that ScanAll, QuerySince, BatchGetItems, and
+// the full Watcher engine can be tested without a real AWS endpoint or LocalStack.
 //
 // Usage:
 //
@@ -33,6 +33,7 @@ func dynamoItem(docID, updateTime string) map[string]any {
 	return map[string]any{
 		"documentID": map[string]any{"S": docID},
 		"updateTime": map[string]any{"S": updateTime},
+		"shard":      map[string]any{"S": ComputeShardDefault(docID)},
 	}
 }
 
@@ -48,6 +49,10 @@ type fakeDynamo struct {
 	// Each call pops the first entry from the shard's queue.
 	queryQueues map[string][][]map[string]any
 
+	// itemStore holds all items ever registered via setScanItems or
+	// setQueryItems, keyed by documentID. Used to serve BatchGetItem requests.
+	itemStore map[string]map[string]any
+
 	// Record of calls made.
 	scanCalls  int
 	queryCalls map[string]int // shard → call count
@@ -57,6 +62,7 @@ func newFakeDynamo() *fakeDynamo {
 	return &fakeDynamo{
 		queryQueues: make(map[string][][]map[string]any),
 		queryCalls:  make(map[string]int),
+		itemStore:   make(map[string]map[string]any),
 	}
 }
 
@@ -66,6 +72,9 @@ func (f *fakeDynamo) setScanItems(items []map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.scanQueue = append(f.scanQueue, items)
+	for _, item := range items {
+		f.storeItem(item)
+	}
 }
 
 // setQueryItems queues a Query response for a specific shard.
@@ -73,6 +82,19 @@ func (f *fakeDynamo) setQueryItems(shard string, items []map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.queryQueues[shard] = append(f.queryQueues[shard], items)
+	for _, item := range items {
+		f.storeItem(item)
+	}
+}
+
+// storeItem indexes an item by documentID for BatchGetItem lookups.
+// Must be called with f.mu held.
+func (f *fakeDynamo) storeItem(item map[string]any) {
+	if docAttr, ok := item["documentID"].(map[string]any); ok {
+		if docID, ok := docAttr["S"].(string); ok {
+			f.itemStore[docID] = item
+		}
+	}
 }
 
 func (f *fakeDynamo) nextScanItems() []map[string]any {
@@ -114,6 +136,8 @@ func (f *fakeDynamo) RoundTrip(req *http.Request) (*http.Response, error) {
 		return f.handleScan(req)
 	case strings.HasSuffix(target, "Query"):
 		return f.handleQuery(req)
+	case strings.HasSuffix(target, "BatchGetItem"):
+		return f.handleBatchGetItem(req)
 	default:
 		return nil, fmt.Errorf("fakeDynamo: unhandled target %q", target)
 	}
@@ -149,6 +173,58 @@ func (f *fakeDynamo) handleQuery(req *http.Request) (*http.Response, error) {
 		"Count":            len(items),
 		"Items":            items,
 		"LastEvaluatedKey": nil,
+	})
+}
+
+// handleBatchGetItem serves BatchGetItem requests by looking up each requested
+// key in itemStore and returning the stored item if found.
+func (f *fakeDynamo) handleBatchGetItem(req *http.Request) (*http.Response, error) {
+	body, _ := io.ReadAll(req.Body)
+	var payload map[string]any
+	_ = json.Unmarshal(body, &payload)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// BatchGetItem payload: {"RequestItems": {"table-name": {"Keys": [{"documentID": {"S": "..."}}]}}}
+	result := make([]map[string]any, 0)
+	if ri, ok := payload["RequestItems"].(map[string]any); ok {
+		for _, tableReq := range ri {
+			if tr, ok := tableReq.(map[string]any); ok {
+				if keys, ok := tr["Keys"].([]any); ok {
+					for _, k := range keys {
+						if km, ok := k.(map[string]any); ok {
+							if docAttr, ok := km["documentID"].(map[string]any); ok {
+								if docID, ok := docAttr["S"].(string); ok {
+									if item, ok := f.itemStore[docID]; ok {
+										result = append(result, item)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Response: {"Responses": {"table-name": [items...]}, "UnprocessedKeys": {}}
+	// We use a fixed table name key since the fake doesn't track table names.
+	// The real BatchGetItems code iterates Responses by table name — we need
+	// to return the correct table name. Parse it from RequestItems.
+	tableName := "test-table"
+	if ri, ok := payload["RequestItems"].(map[string]any); ok {
+		for k := range ri {
+			tableName = k
+			break
+		}
+	}
+
+	return f.jsonResponse(200, map[string]any{
+		"Responses": map[string]any{
+			tableName: result,
+		},
+		"UnprocessedKeys": map[string]any{},
 	})
 }
 
