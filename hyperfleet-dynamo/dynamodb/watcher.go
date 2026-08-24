@@ -212,8 +212,7 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			log.Info("relist tick firing")
-			w.runRelist(ctx, log)
-			if firstRelist {
+			if w.runRelist(ctx, log) && firstRelist {
 				firstRelist = false
 				close(w.doneCh)
 			}
@@ -221,12 +220,12 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 	}
 }
 
-func (w *Watcher) runRelist(ctx context.Context, log logr.Logger) {
+func (w *Watcher) runRelist(ctx context.Context, log logr.Logger) bool {
 	// Full consistent scan — returns complete item attribute maps.
 	fullItems, err := ScanAll(ctx, w.client, w.tableName)
 	if err != nil {
 		log.Error(err, "relist scan failed")
-		return
+		return false
 	}
 
 	// Extract stubs (documentID → updateTime) for cache diffing.
@@ -256,6 +255,7 @@ func (w *Watcher) runRelist(ctx context.Context, log logr.Logger) {
 	for _, docID := range deleted {
 		w.onChange(docID, nil)
 	}
+	return true
 }
 
 // fastPollLoop queries the GSI on a ticker using the expanding lookback window.
