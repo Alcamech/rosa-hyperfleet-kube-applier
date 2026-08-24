@@ -39,7 +39,7 @@ sequenceDiagram
    been removed.
 3. **Validate** — `spec.targetItem` must carry `version`, `resource`, and
    `name`. `spec.serverSideApply.kubeContent` must be non-nil and valid JSON.
-   Validation failures set `Successful=False` (reason `PreCheckError`) but do
+   Validation failures set `Successful=False` (reason `PreCheckFailed`) but do
    **not** set `Degraded=True`; they are treated as client-side
    misconfiguration.
 4. **Decode** — `spec.serverSideApply.kubeContent` is unmarshalled into an
@@ -66,10 +66,10 @@ flowchart TD
     A([Dequeue key]) --> B[Fetch spec from DynamoDB]
     B -- not found --> Z([done])
     B -- found --> C{Validate targetItem}
-    C -- invalid --> PRECHECKERR[Successful=False\nPreCheckError]
+    C -- invalid --> PRECHECKERR[Successful=False\nPreCheckFailed]
     C -- valid --> D[GET target from kube-apiserver]
     D -- 404 Not Found --> SUCCESS[Successful=True]
-    D -- other error --> ERR[Successful=False\nReconcileError]
+    D -- other error --> ERR[Successful=False\nKubeAPIError]
     D -- exists,\nhas deletionTimestamp --> WAITING[Successful=False\nWaitingForDeletion\nwith timestamp + UID]
     D -- exists,\nno deletionTimestamp --> DEL[DELETE target]
     DEL -- 404 --> SUCCESS
@@ -91,7 +91,7 @@ flowchart TD
 2. **Fetch spec** — `GetItem` on the specs table. If the document is gone
    (`ErrNotFound`) the controller returns without error.
 3. **Validate** — `spec.targetItem` must carry `version`, `resource`, and
-   `name`. Failure sets `Successful=False` (reason `PreCheckError`); the key is
+   `name`. Failure sets `Successful=False` (reason `PreCheckFailed`); the key is
    not requeued.
 4. **Get target** — retrieves the live object from the MC kube-apiserver. If it
    is already gone, the controller records `Successful=True` and stops.
@@ -135,10 +135,10 @@ Both conditions are written on every reconcile pass.
 
 | Reason | Status | Meaning |
 |---|---|---|
-| `ReconcileSuccess` | `True` | SSA completed (ServerSideApply) or target is gone (Delete) |
-| `WaitingForDeletion` | `False` | Object exists with `deletionTimestamp`; controller is polling |
-| `PreCheckError` | `False` | Spec is invalid (missing fields, bad JSON, unknown type) |
-| `ReconcileError` | `False` | Kube API returned a 4xx or the SSA / Delete call failed |
+| `NoErrors`            | `True` | SSA completed (ServerSideApply) or target is gone (Delete) |
+| `WaitingForDeletion`  | `False` | Object exists with `deletionTimestamp`; controller is polling |
+| `PreCheckFailed`      | `False` | Spec is invalid (missing fields, bad JSON, unknown type) |
+| `KubeAPIError`        | `False` | Kube API returned a 4xx or the SSA / Delete call failed |
 
 ### `Degraded`
 
