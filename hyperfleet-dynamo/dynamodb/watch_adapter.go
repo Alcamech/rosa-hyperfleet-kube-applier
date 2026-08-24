@@ -47,7 +47,6 @@ func (ListWatchWithoutWatchListSemantics) IsWatchListSemanticsUnSupported() bool
 type WatchAdapter struct {
 	watcher  *Watcher
 	resultCh chan watch.Event
-	stopCh   chan struct{}
 }
 
 // NewWatchAdapter creates a WatchAdapter backed by a new Watcher and
@@ -64,7 +63,6 @@ func NewWatchAdapter(
 ) *WatchAdapter {
 	a := &WatchAdapter{
 		resultCh: make(chan watch.Event, 100),
-		stopCh:   make(chan struct{}),
 	}
 
 	a.watcher = New(client, tableName, func(docID string, item Item) {
