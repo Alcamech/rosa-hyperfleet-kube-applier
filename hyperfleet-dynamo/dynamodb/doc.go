@@ -61,3 +61,4 @@
 // Items must have shard and updateTime attributes set at write time for the
 // fast poller to see them.
 package dynamodb
+
