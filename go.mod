@@ -11,8 +11,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.15.25
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.62.0
 	github.com/google/uuid v1.6.0
-	github.com/prometheus/client_golang v1.23.2
 	github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo v0.0.0-00010101000000-000000000000
+	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
