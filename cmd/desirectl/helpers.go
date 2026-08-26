@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 

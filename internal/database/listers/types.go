@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
 )
 
 func listAll[T any](store cache.Store) ([]*T, error) {

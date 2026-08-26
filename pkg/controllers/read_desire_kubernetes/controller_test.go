@@ -12,11 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/listertesting"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/conditions"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/desirestatuswriter"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/keys"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/listertesting"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/conditions"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/desirestatuswriter"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/keys"
 )
 
 func configMapTarget(name string) kubeapplier.ResourceReference {

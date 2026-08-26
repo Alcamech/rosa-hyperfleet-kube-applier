@@ -14,10 +14,10 @@ import (
 	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"k8s.io/client-go/tools/cache"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/listers"
-	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/listers"
+	hd "github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 )
 
 // --- Unit tests (no LocalStack required) ---

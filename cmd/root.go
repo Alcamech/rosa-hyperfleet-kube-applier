@@ -14,10 +14,10 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/informers"
-	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/app"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/informers"
+	hd "github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/app"
 )
 
 // KubeApplierRootCmdFlags collects the user-facing flags for the kube-applier

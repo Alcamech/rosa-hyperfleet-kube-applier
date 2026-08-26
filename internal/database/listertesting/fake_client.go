@@ -1,8 +1,8 @@
 package listertesting
 
 import (
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
 )
 
 // FakeKubeApplierDBClient is an in-memory implementation of

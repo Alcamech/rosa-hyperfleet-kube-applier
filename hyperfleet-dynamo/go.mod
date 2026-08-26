@@ -1,4 +1,4 @@
-module github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo
+module github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo
 
 go 1.26.3
 

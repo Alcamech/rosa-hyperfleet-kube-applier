@@ -15,7 +15,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
 )
 
 func init() {
