@@ -131,7 +131,6 @@ func newTestWatcher(fd *fakeDynamo, onChange OnChange, pollInterval, relistInter
 		Options{
 			PollInterval:   pollInterval,
 			RelistInterval: relistInterval,
-			StartupDelay:   5 * time.Millisecond,
 			ShardCount:     GSIShardCount,
 		},
 	)
@@ -406,12 +405,9 @@ func TestWatcher_Relist_UnchangedItem_NoSecondCallback(t *testing.T) {
 // Fast poll end-to-end tests
 //
 // Key parameter choices:
-//   relistInterval: 50ms   — relist fires at t=50ms, before poll starts at t=500ms
-//   pollInterval:   20ms   — first poll fires at t=520ms
-//
-// Startup sequence: relist goroutine starts immediately, poll goroutine starts
-// after startupRelistDelay (500ms). With relistInterval=50ms, the first relist
-// completes at t=50ms and seeds the cache well before the poll fires at t=520ms.
+//   relistInterval: 50ms   — eager relist fires at startup, seeding the cache
+//                            before the fast poll goroutine's first tick
+//   pollInterval:   20ms   — first poll tick fires ~20ms after Run() starts
 // ---------------------------------------------------------------------------
 
 func TestWatcher_FastPoll_DetectsNewItem(t *testing.T) {
@@ -705,14 +701,12 @@ func TestWatcher_Stop_BeforeFirstRelist_StopsCleanly(t *testing.T) {
 
 func TestWatcher_StartupOrder_RelistStartsBeforePoll(t *testing.T) {
 	// Startup sequence (watcher.go Run()):
-	//   1. Relist goroutine starts immediately.
-	//   2. startupRelistDelay (500ms) pause.
-	//   3. Fast poll goroutine starts.
+	//   1. relistLoop runs an eager relist synchronously before the ticker loop.
+	//   2. Both the relist goroutine (now on ticker) and fast poll goroutine run.
 	//
-	// We verify: the first Scan (relist) fires before the first Query (poll).
-	// With relistInterval=50ms the first Scan fires at t≈50ms.
-	// The poll goroutine doesn't start until t=500ms, so first Query fires at t≈520ms.
-	// Therefore relistAt < pollAt is guaranteed.
+	// We verify: the first Scan (eager relist) fires before the first Query (poll).
+	// With pollInterval=20ms the first Query fires ~20ms after Run() starts,
+	// but the eager Scan runs synchronously at startup — so Scan always precedes Query.
 	var relistAt, pollAt int64 // unix nanoseconds; 0 = not yet called
 	var scanCount, queryCount int32
 

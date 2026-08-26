@@ -18,9 +18,4 @@ const (
 	// DefaultRelistInterval is how often the full consistent relist runs.
 	// After each relist the expanding lookback window resets to near-zero.
 	DefaultRelistInterval = 5 * time.Minute
-
-	// startupRelistDelay is the pause between starting the relist goroutine
-	// and the fast poll goroutine, giving the first relist time to seed the
-	// cache before fast polls begin. Mirrors watcher.py lines 981-986.
-	startupRelistDelay = 500 * time.Millisecond
 )

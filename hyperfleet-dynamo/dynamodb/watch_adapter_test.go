@@ -48,7 +48,6 @@ func TestWatchAdapter_DeliversModified(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
-		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
 	}, testDecodeFn)
 	defer adapter.Stop()
@@ -85,7 +84,6 @@ func TestWatchAdapter_ResultChanClosesOnCtxCancel(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
-		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
 	}, testDecodeFn)
 
@@ -117,7 +115,6 @@ func TestWatchAdapter_Stop_ClosesResultChan(t *testing.T) {
 	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
 		PollInterval:   time.Hour,
 		RelistInterval: 50 * time.Millisecond,
-		StartupDelay:   5 * time.Millisecond,
 		ShardCount:     GSIShardCount,
 	}, testDecodeFn)
 

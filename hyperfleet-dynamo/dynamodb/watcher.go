@@ -46,12 +46,6 @@ type Options struct {
 	// Defaults to GSIShardCount (4).
 	ShardCount int
 
-	// StartupDelay is the pause between starting the relist goroutine and the
-	// fast poll goroutine, giving the first relist time to seed the cache
-	// before fast polls begin. Defaults to startupRelistDelay (500ms).
-	// Set to a small value in tests to avoid slow startup.
-	StartupDelay time.Duration
-
 	// Logger is used for structured logging. If the zero value is passed,
 	// logr.Discard() is used. Callers should pass klog.Background() (kube-applier)
 	// or ctrl.Log (operator) so logs flow through the standard k8s logging pipeline.
@@ -85,13 +79,6 @@ func (o Options) shardCount() int {
 		return GSIShardCount
 	}
 	return o.ShardCount
-}
-
-func (o Options) startupDelay() time.Duration {
-	if o.StartupDelay <= 0 {
-		return startupRelistDelay
-	}
-	return o.StartupDelay
 }
 
 func (o Options) logger() logr.Logger {
@@ -147,12 +134,11 @@ func (w *Watcher) Stop() {
 // Run starts the watcher's two loops and blocks until the context is cancelled
 // or Stop is called.
 //
-// Startup sequence (mirrors watcher.py lines 981-986):
-//  1. Relist goroutine starts immediately.
-//  2. After startupRelistDelay (500ms), fast poll goroutine starts.
-//
-// This ensures the cache is seeded from a consistent scan before the fast poll
-// begins, so the first fast poll has a populated cache to dedup against.
+// Startup sequence:
+//  1. An eager relist runs synchronously before the ticker loop begins, seeding
+//     the cache before the fast poll goroutine is launched.
+//  2. Both the relist goroutine (now looping on the ticker) and the fast poll
+//     goroutine run concurrently.
 func (w *Watcher) Run(ctx context.Context) {
 	log := w.opts.logger().WithValues("table", w.tableName, "component", "hyperfleet-dynamo/watcher")
 	log.Info("watcher starting",
@@ -170,21 +156,6 @@ func (w *Watcher) Run(ctx context.Context) {
 		w.relistLoop(ctx)
 	}()
 
-	// Small startup delay before launching the fast poll. With production
-	// relist intervals (5m) this does not seed the cache — the first few fast
-	// polls will redundantly rediscover items the informer List already found.
-	// The delay is mainly useful in tests where RelistInterval is tiny and the
-	// first relist completes within the delay window.
-	select {
-	case <-ctx.Done():
-		<-relistDone
-		return
-	case <-w.stopCh:
-		<-relistDone
-		return
-	case <-time.After(w.opts.startupDelay()):
-	}
-
 	go func() {
 		defer close(pollDone)
 		w.fastPollLoop(ctx)
@@ -194,8 +165,9 @@ func (w *Watcher) Run(ctx context.Context) {
 	<-pollDone
 }
 
-// relistLoop runs the full consistent relist on a ticker. After the first
-// relist it closes doneCh to signal natural expiry to the Manager.
+// relistLoop runs an eager relist immediately on startup to seed the cache,
+// then continues on a ticker. After the first successful relist it closes
+// doneCh to signal natural expiry to the Manager.
 func (w *Watcher) relistLoop(ctx context.Context) {
 	log := w.opts.logger().WithValues("table", w.tableName, "component", "hyperfleet-dynamo/relist")
 	ticker := time.NewTicker(w.opts.relistInterval())
@@ -204,6 +176,15 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 	firstRelist := true
 
 	log.Info("relist loop started", "interval", w.opts.relistInterval())
+
+	// Run an eager relist immediately so the cache is seeded before the fast
+	// poll begins. With production relist intervals (5m) the ticker's first
+	// tick fires well after the fast poll has already started; without this
+	// eager call the cache would be empty for the first ~5 minutes.
+	if w.runRelist(ctx, log) && firstRelist {
+		firstRelist = false
+		close(w.doneCh)
+	}
 
 	for {
 		select {
@@ -215,10 +196,7 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			log.Info("relist tick firing")
-			if w.runRelist(ctx, log) && firstRelist {
-				firstRelist = false
-				close(w.doneCh)
-			}
+			w.runRelist(ctx, log)
 		}
 	}
 }
