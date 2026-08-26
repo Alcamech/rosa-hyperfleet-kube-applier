@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 )
 
 // desire is the type constraint for the generic CRUD implementations. It
@@ -62,7 +63,8 @@ func itemToDesire[T any, PT desire[T]](item map[string]types.AttributeValue) (*T
 
 // desireToItem converts a typed desire value to a DynamoDB item map ready for
 // PutItem. The documentID partition key is added explicitly. kubeContent
-// fields are merged in as S attributes.
+// fields are merged in as S attributes. The shard attribute is computed and
+// added so the updateTime-index GSI can index the item.
 func desireToItem[T any, PT desire[T]](pt PT) (map[string]types.AttributeValue, error) {
 	item, err := attributevalue.MarshalMap(pt)
 	if err != nil {
@@ -70,6 +72,11 @@ func desireToItem[T any, PT desire[T]](pt PT) (map[string]types.AttributeValue, 
 	}
 	// Explicitly set the partition key.
 	item[attributeDocumentID] = &types.AttributeValueMemberS{Value: pt.GetDocumentID()}
+
+	// Set the shard attribute for the updateTime-index GSI.
+	// GSIShardCount must match the Terraform definition in
+	// rosa-hyperfleet/terraform/modules/kube-applier-dynamodb/main.tf.
+	item["shard"] = &types.AttributeValueMemberS{Value: hd.ComputeShardDefault(pt.GetDocumentID())}
 
 	// Merge kubeContent string attributes.
 	kubeAttrs, err := kubeContentAttributeValues(pt)

@@ -5,6 +5,7 @@ RUN microdnf install -y golang git && microdnf clean all
 
 WORKDIR /app
 COPY go.mod go.sum ./
+COPY hyperfleet-dynamo/go.mod ./hyperfleet-dynamo/go.mod
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /kube-applier-aws .

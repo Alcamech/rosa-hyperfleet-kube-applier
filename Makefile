@@ -80,6 +80,7 @@ test: test-unit test-integration
 
 test-unit:
 	GOTELEMETRY=off go test -vet=off -race -count=1 ./...
+	cd hyperfleet-dynamo && GOTELEMETRY=off go test -vet=off -race -count=1 ./...
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers

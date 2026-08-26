@@ -174,6 +174,8 @@ func (c *ReadDesireInformerManagingController) handleUpdate(oldObj, newObj any) 
 	if !oldOK || !newOK {
 		return
 	}
+	// The WatchAdapter delivers fully typed ReadDesire objects with real
+	// UpdateTime values. Enqueue immediately if the UpdateTime has changed.
 	if !oldD.UpdateTime.Equal(newD.UpdateTime) {
 		c.enqueue(newD)
 		return

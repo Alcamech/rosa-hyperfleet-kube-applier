@@ -16,7 +16,7 @@ graph LR
     DBT["DynamoDB status tables\n(RC account)"]
 
     HF -->|writes desires| DBS
-    DBS -->|Streams TRIM_HORIZON\npoll ~2 s| KA
+    DBS -->|GSI two-speed poll\n(15s fast / 5m relist)| KA
     KA -->|SSA / Delete / Watch| API
     KA -->|writes status| DBT
     DBT -->|reads status| HF
@@ -27,21 +27,23 @@ and status output flows through DynamoDB.
 
 ## DynamoDB table layout
 
-Six tables are provisioned per MC in the RC account. Table names follow the
+Four tables are provisioned per MC in the RC account. Table names follow the
 prefix convention passed to the controller via `--specs-table` and
 `--status-table` flags (ARN form in production):
 
-| Table suffix | Direction | Streams | PITR |
+| Table suffix | Direction | GSI | PITR |
 |---|---|---|---|
-| `{mc}-specs-applydesires` | hyperfleet-operator → controller | `NEW_AND_OLD_IMAGES` | non-ephemeral |
-| `{mc}-specs-deletedesires` | hyperfleet-operator → controller | `NEW_AND_OLD_IMAGES` | non-ephemeral |
-| `{mc}-specs-readdesires` | hyperfleet-operator → controller | `NEW_AND_OLD_IMAGES` | non-ephemeral |
+| `{mc}-specs-applydesires` | hyperfleet-operator → controller | `updateTime-index` | non-ephemeral |
+| `{mc}-specs-readdesires` | hyperfleet-operator → controller | `updateTime-index` | non-ephemeral |
 | `{mc}-status-applydesires` | controller → hyperfleet-operator | — | non-ephemeral |
-| `{mc}-status-deletedesires` | controller → hyperfleet-operator | — | non-ephemeral |
 | `{mc}-status-readdesires` | controller → hyperfleet-operator | — | non-ephemeral |
 
-The partition key in every table is `documentID` (string). There are no sort
-keys or secondary indexes.
+The partition key in every table is `documentID` (string). The specs tables
+carry a `updateTime-index` GSI (hash key: `shard`, range key: `updateTime`)
+used by the two-speed polling watcher. DynamoDB Streams are not used.
+
+Deletion is modelled as `ApplyDesire` with `spec.type=Delete` — there are no
+separate `deletedesires` tables.
 
 ## Document ID scheme
 
@@ -65,18 +67,21 @@ all existing document IDs.
 
 ## Informers and change detection
 
-Each specs table is watched via two mechanisms:
+Each specs table is watched via the `hyperfleet-dynamo` two-speed engine:
 
 1. **Initial list (Scan)** — on startup the informer issues a full `Scan` to
    populate its in-memory store.
-2. **DynamoDB Streams shard polling** — the stream watcher opens every shard at
-   `TRIM_HORIZON` and polls for new records in a tight loop. End-to-end latency
-   from a spec write to a controller reconcile is approximately 2 seconds.
+2. **Fast poll (default 15 s)** — fans out parallel `Query` calls across 4 GSI
+   shard buckets for items updated since the expanding lookback window. Changed
+   document IDs are fetched in full via `BatchGetItem` and delivered as
+   `watch.Modified` events. No consumer limit; no stream shard management.
+3. **Full relist (default 5 m)** — consistent full-table `Scan` diffs against
+   the stub cache to detect additions, modifications, and deletions. Resets the
+   expanding lookback window.
 
-The stream watcher translates `INSERT` and `MODIFY` records into `Added` /
-`Updated` events on the shared informer. `REMOVE` records are not surfaced
-because desire deletion is handled by the `DeleteDesire` type rather than by
-removing the spec item.
+The `WatchAdapter` translates `OnChange` callbacks into typed `watch.Event`
+objects (`*ApplyDesire` / `*ReadDesire`) consumed by the `SharedIndexInformer`.
+See `hyperfleet-dynamo/dynamodb/doc.go` for the full engine description.
 
 ## Optimistic concurrency
 
@@ -97,7 +102,8 @@ rejected with `ErrPreconditionFailed`. The status writer retries with a fresh
 One controller replica holds the leader lease at any time. Leases are stored as
 Kubernetes `Lease` objects in the controller's own namespace. The lease name is
 configurable via `--leader-election-id` (default: `kube-applier`). Only the
-leader runs the reconcile workers; standby replicas wait.
+leader runs the reconcile workers and starts the DynamoDB informers; standby
+replicas wait.
 
 ## Cross-account access
 
@@ -105,7 +111,7 @@ The MC account holds the EKS cluster. The RC account holds the DynamoDB tables.
 [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html)
 associates the `kube-applier` ServiceAccount in the `kube-applier` namespace
 to an IAM role in the MC account. That role carries two inline policies
-(specs: read + Streams; status: read-write) scoped to the RC account table ARNs.
+(specs: read + GSI query; status: read-write) scoped to the RC account table ARNs.
 No static credentials are used. See [deployment.md](deployment.md) for the
 full IAM details.
 
@@ -118,10 +124,11 @@ and IAM — each controller role is scoped to its own MC's tables.
 | Dimension | Behaviour |
 |---|---|
 | Replicas | 1 active (leader elected); N standby |
-| Per-table concurrency | Configurable worker threadiness (default: 2) |
-| Streams lag | ~2 s end-to-end under normal conditions |
-| ApplyDesire cooldown | 10 min for unchanged desires |
-| DeleteDesire cooldown | 1 min (short to service finalizer drain) |
+| Per-table concurrency | Configurable worker threadiness (default: 4 for apply, 1 for read manager) |
+| GSI fast-poll interval | 15 s (configurable via `--dynamo-poll-interval`) |
+| Full relist interval | 5 m (configurable via `--dynamo-relist-interval`) |
+| ApplyDesire SSA cooldown | 10 min for unchanged desires |
+| ApplyDesire Delete cooldown | 1 min (short to poll for finalizer completion) |
 | ReadDesire resync | 60 s unconditional ticker |
 
 ## Divergence from kube-applier-gcp
@@ -129,7 +136,7 @@ and IAM — each controller role is scoped to its own MC's tables.
 | Dimension | GCP (Firestore) | AWS (DynamoDB) |
 |---|---|---|
 | Storage | Firestore named databases | DynamoDB tables |
-| Change stream | gRPC `collection.Snapshots()` | DynamoDB Streams TRIM_HORIZON shard poll (~2 s) |
+| Change stream | gRPC `collection.Snapshots()` | GSI two-speed poll (15 s fast / 5 m relist) |
 | Concurrency guard | Firestore `LastUpdateTime` precondition | `version` counter + `ConditionExpression` |
 | API errors | gRPC status codes | Go sentinel errors (`ErrNotFound`, `ErrPreconditionFailed`, `ErrAlreadyExists`) |
 | Metadata type | `FirestoreMetadata` | `DynamoDBMetadata` |

@@ -34,7 +34,7 @@ sequenceDiagram
     participant DBT as DynamoDB status table
 
     HF->>DBS: PutItem (ReadDesire spec)
-    DBS-->>MGR: Streams event (~2 s)
+    DBS-->>MGR: GSI poll event (≤15 s)
     MGR->>DBS: GetItem (re-read spec)
     MGR->>KUB: spawn (or restart) per-instance controller
     KUB->>API: List + Watch (field selector: name=target)
@@ -105,9 +105,9 @@ manager's cooldown.
 
 | Reason | Status | Meaning |
 |---|---|---|
-| `ReconcileSuccess` | `True` | `status.kubeContent` reflects current state (present or absent) |
-| `PreCheckError` | `False` | `spec.targetItem` is invalid (missing version, resource, or name) |
-| `ReconcileError` | `False` | Error reading from the kube informer cache or DynamoDB |
+| `NoErrors`       | `True` | `status.kubeContent` reflects current state (present or absent) |
+| `PreCheckFailed` | `False` | `spec.targetItem` is invalid (missing version, resource, or name) |
+| `KubeAPIError`   | `False` | Error reading from the kube informer cache or DynamoDB |
 
 `status.kubeContent` being nil means the object does not exist — this is a
 valid terminal state, not an error.

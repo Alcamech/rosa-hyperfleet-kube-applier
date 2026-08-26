@@ -1,6 +1,6 @@
 // Package integration contains end-to-end tests that wire the full
-// kube-applier-aws stack: LocalStack (DynamoDB + Streams) as the backend store
-// and a Kind cluster (real kube-apiserver) as the reconciliation target.
+// kube-applier-aws stack: LocalStack (DynamoDB + GSI polling) as the backend
+// store and a Kind cluster (real kube-apiserver) as the reconciliation target.
 //
 // # Prerequisites
 //
@@ -31,7 +31,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodbstreams"
 	"github.com/prometheus/client_golang/prometheus"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,11 +41,13 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"k8s.io/klog/v2"
 
 	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/informers"
 	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/app"
+	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 )
 
 // ----------------------------------------------------------------------------
@@ -78,7 +79,6 @@ func requireIntegration(t *testing.T) (localstackEndpoint, kubeconfigPath string
 // fixture holds all wired dependencies for a single test run.
 type fixture struct {
 	dynDB          *dynamodb.Client
-	streamsDB      *dynamodbstreams.Client
 	dbClient       database.KubeApplierDBClient
 	dynKube        dynamic.Interface
 	kubeconfigPath string
@@ -102,7 +102,6 @@ func newFixture(t *testing.T, localstackEndpoint, kubeconfigPath string) *fixtur
 	}
 
 	dynDB := dynamodb.NewFromConfig(cfg)
-	streamsDB := dynamodbstreams.NewFromConfig(cfg)
 
 	ts := fmt.Sprintf("%d", time.Now().UnixNano())
 	specsPrefix := "inttest-" + ts + "-specs"
@@ -131,7 +130,6 @@ func newFixture(t *testing.T, localstackEndpoint, kubeconfigPath string) *fixtur
 
 	return &fixture{
 		dynDB:          dynDB,
-		streamsDB:      streamsDB,
 		dbClient:       dbClient,
 		dynKube:        dynKube,
 		kubeconfigPath: kubeconfigPath,
@@ -140,8 +138,9 @@ func newFixture(t *testing.T, localstackEndpoint, kubeconfigPath string) *fixtur
 	}
 }
 
-// createTable creates a DynamoDB table with a "documentID" hash key and
-// Streams enabled (NEW_AND_OLD_IMAGES), and registers deletion in t.Cleanup.
+// createTable creates a DynamoDB table with a "documentID" hash key and the
+// updateTime-index GSI (matching production Terraform), and registers deletion
+// in t.Cleanup.
 func createTable(t *testing.T, dbClient *dynamodb.Client, tableName string) {
 	t.Helper()
 	_, err := dbClient.CreateTable(context.Background(), &dynamodb.CreateTableInput{
@@ -149,13 +148,23 @@ func createTable(t *testing.T, dbClient *dynamodb.Client, tableName string) {
 		BillingMode: dbtypes.BillingModePayPerRequest,
 		AttributeDefinitions: []dbtypes.AttributeDefinition{
 			{AttributeName: aws.String("documentID"), AttributeType: dbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("shard"), AttributeType: dbtypes.ScalarAttributeTypeS},
+			{AttributeName: aws.String("updateTime"), AttributeType: dbtypes.ScalarAttributeTypeS},
 		},
 		KeySchema: []dbtypes.KeySchemaElement{
 			{AttributeName: aws.String("documentID"), KeyType: dbtypes.KeyTypeHash},
 		},
-		StreamSpecification: &dbtypes.StreamSpecification{
-			StreamEnabled:  aws.Bool(true),
-			StreamViewType: dbtypes.StreamViewTypeNewAndOldImages,
+		GlobalSecondaryIndexes: []dbtypes.GlobalSecondaryIndex{
+			{
+				IndexName: aws.String("updateTime-index"),
+				KeySchema: []dbtypes.KeySchemaElement{
+					{AttributeName: aws.String("shard"), KeyType: dbtypes.KeyTypeHash},
+					{AttributeName: aws.String("updateTime"), KeyType: dbtypes.KeyTypeRange},
+				},
+				Projection: &dbtypes.Projection{
+					ProjectionType: dbtypes.ProjectionTypeAll,
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -176,13 +185,31 @@ func createTable(t *testing.T, dbClient *dynamodb.Client, tableName string) {
 // returns a cancel func to stop the app and a channel that receives the Run
 // error when the app exits.
 func startApp(t *testing.T, f *fixture) (context.CancelFunc, <-chan error) {
+	return startAppWithWatcherOpts(t, f, hd.Options{
+		Logger: klog.Background(),
+	})
+}
+
+// startAppFast is like startApp but configures the watcher with tight poll and
+// relist intervals suitable for integration tests that need to observe the GSI
+// poller fire within a few seconds (rather than the production 15s / 5m defaults).
+func startAppFast(t *testing.T, f *fixture) (context.CancelFunc, <-chan error) {
+	return startAppWithWatcherOpts(t, f, hd.Options{
+		PollInterval:   3 * time.Second,
+		RelistInterval: time.Minute,
+		Logger:         klog.Background(),
+	})
+}
+
+func startAppWithWatcherOpts(t *testing.T, f *fixture, watcherOpts hd.Options) (context.CancelFunc, <-chan error) {
 	t.Helper()
 
 	reg := prometheus.NewRegistry()
 
-	inf := informers.NewKubeApplierInformersWithResyncPeriod(
-		f.dynDB, f.streamsDB, f.specsPrefix,
+	inf := informers.NewKubeApplierInformersWithOptions(
+		f.dynDB, f.specsPrefix,
 		5*time.Second,
+		watcherOpts,
 	)
 
 	restCfg, err := clientcmd.BuildConfigFromFlags("", f.kubeconfigPath)
@@ -310,6 +337,7 @@ func writeApplyDesireSpec(t *testing.T, dbClient *dynamodb.Client, specsPrefix s
 
 	item := map[string]dbtypes.AttributeValue{
 		"documentID": &dbtypes.AttributeValueMemberS{Value: d.DocumentID},
+		"shard":      &dbtypes.AttributeValueMemberS{Value: hd.ComputeShardDefault(d.DocumentID)},
 		"version":    &dbtypes.AttributeValueMemberN{Value: "1"},
 		"updateTime": &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
 		"createTime": &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
@@ -404,6 +432,7 @@ func writeReadDesireSpec(t *testing.T, dbClient *dynamodb.Client, specsPrefix st
 	tableName := specsPrefix + database.TableSuffixReadDesires
 	item := map[string]dbtypes.AttributeValue{
 		"documentID": &dbtypes.AttributeValueMemberS{Value: d.DocumentID},
+		"shard":      &dbtypes.AttributeValueMemberS{Value: hd.ComputeShardDefault(d.DocumentID)},
 		"version":    &dbtypes.AttributeValueMemberN{Value: "1"},
 		"updateTime": &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
 		"createTime": &dbtypes.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339Nano)},
@@ -644,4 +673,183 @@ func TestIntegration_OptimisticConcurrency(t *testing.T) {
 			precondFailed, r1.err, r2.err)
 	}
 	t.Logf("optimistic concurrency: exactly one Replace won, one got ErrPreconditionFailed")
+}
+
+// TestIntegration_PollerDetectsNewSpec starts the app with an empty table, then
+// writes an ApplyDesire spec after the app is running and asserts that the GSI
+// fast poller (not the initial relist) detects the new item and the controller
+// creates the ConfigMap. This validates the end-to-end poller-driven path
+// including the shard attribute being set correctly on the written item.
+func TestIntegration_PollerDetectsNewSpec(t *testing.T) {
+	localstackEndpoint, kubeconfigPath := requireIntegration(t)
+	f := newFixture(t, localstackEndpoint, kubeconfigPath)
+
+	const (
+		documentID = "inttest--poller-new-cm"
+		cmName     = "inttest-poller-new-cm"
+		namespace  = "default"
+	)
+
+	_ = f.dynKube.Resource(configMapGVR).Namespace(namespace).Delete(
+		context.Background(), cmName, metav1.DeleteOptions{})
+
+	// Start the app with an EMPTY table so the initial relist finds nothing.
+	// Use fast watcher intervals (3s poll) so we don't wait 15s.
+	cancel, errCh := startAppFast(t, f)
+	t.Cleanup(func() {
+		cancel()
+		<-errCh
+	})
+	t.Cleanup(func() {
+		_ = f.dynKube.Resource(configMapGVR).Namespace(namespace).Delete(
+			context.Background(), cmName, metav1.DeleteOptions{})
+	})
+
+	// Wait for the app to stabilize (initial relist completes, nothing found).
+	// startupRelistDelay=500ms + relist ticker fires after relistInterval=10s.
+	// Give it 15s to be safely past the first relist with an empty result.
+	time.Sleep(15 * time.Second)
+
+	// NOW write the spec — the poller must detect it via the GSI (shard field
+	// must be set or the item will be invisible to the GSI query).
+	cmJSON, err := json.Marshal(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]interface{}{"name": cmName, "namespace": namespace},
+		"data":       map[string]interface{}{"source": "poller"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	writeApplyDesireSpec(t, f.dynDB, f.specsPrefix, &kubeapplier.ApplyDesire{
+		DynamoDBMetadata: kubeapplier.DynamoDBMetadata{DocumentID: documentID},
+		Spec: kubeapplier.ApplyDesireSpec{
+			ManagementCluster: "inttest",
+			ClusterID:         "inttest",
+			TargetItem: kubeapplier.ResourceReference{
+				Version:   "v1",
+				Resource:  "configmaps",
+				Namespace: namespace,
+				Name:      cmName,
+			},
+			ServerSideApply: &kubeapplier.ServerSideApplyConfig{
+				KubeContent: &runtime.RawExtension{Raw: cmJSON},
+			},
+		},
+	})
+	t.Logf("spec written after app start — waiting for GSI poller to detect it")
+
+	// The poller fires every 3s; allow up to 30s for it to pick up the item
+	// and the controller to create the ConfigMap.
+	pollUntil(t, 30*time.Second, func() bool {
+		obj, _ := getConfigMap(f.dynKube, namespace, cmName)
+		return obj != nil
+	})
+	t.Logf("ConfigMap %s/%s created via GSI fast poller path", namespace, cmName)
+
+	// Status must also be written.
+	pollUntil(t, 15*time.Second, func() bool {
+		status, err := f.dbClient.ApplyDesireStatus().Get(context.Background(), documentID)
+		if err != nil {
+			return false
+		}
+		for _, c := range status.Status.Conditions {
+			if c.Type == kubeapplier.ConditionTypeSuccessful && c.Status == metav1.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	})
+	t.Logf("ApplyDesire status Successful=True after poller-driven reconcile")
+}
+
+// TestIntegration_ApplyThenDeleteViaPoller writes an Apply spec, waits for the
+// ConfigMap to appear, then overwrites the same document with Type=Delete
+// (bumping updateTime so the GSI poller detects the change) and asserts that
+// the ConfigMap is removed from the cluster.
+func TestIntegration_ApplyThenDeleteViaPoller(t *testing.T) {
+	localstackEndpoint, kubeconfigPath := requireIntegration(t)
+	f := newFixture(t, localstackEndpoint, kubeconfigPath)
+
+	const (
+		documentID = "inttest--apply-then-delete"
+		cmName     = "inttest-apply-then-delete-cm"
+		namespace  = "default"
+	)
+
+	_ = f.dynKube.Resource(configMapGVR).Namespace(namespace).Delete(
+		context.Background(), cmName, metav1.DeleteOptions{})
+
+	cmJSON, err := json.Marshal(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]interface{}{"name": cmName, "namespace": namespace},
+		"data":       map[string]interface{}{"phase": "apply"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	// Phase 1: write Apply spec before app starts so relist picks it up.
+	writeApplyDesireSpec(t, f.dynDB, f.specsPrefix, &kubeapplier.ApplyDesire{
+		DynamoDBMetadata: kubeapplier.DynamoDBMetadata{DocumentID: documentID},
+		Spec: kubeapplier.ApplyDesireSpec{
+			ManagementCluster: "inttest",
+			ClusterID:         "inttest",
+			TargetItem: kubeapplier.ResourceReference{
+				Version:   "v1",
+				Resource:  "configmaps",
+				Namespace: namespace,
+				Name:      cmName,
+			},
+			ServerSideApply: &kubeapplier.ServerSideApplyConfig{
+				KubeContent: &runtime.RawExtension{Raw: cmJSON},
+			},
+		},
+	})
+
+	cancel, errCh := startAppFast(t, f)
+	t.Cleanup(func() {
+		cancel()
+		<-errCh
+	})
+	t.Cleanup(func() {
+		_ = f.dynKube.Resource(configMapGVR).Namespace(namespace).Delete(
+			context.Background(), cmName, metav1.DeleteOptions{})
+	})
+
+	// Phase 1 assertion: ConfigMap appears.
+	pollUntil(t, 60*time.Second, func() bool {
+		obj, _ := getConfigMap(f.dynKube, namespace, cmName)
+		return obj != nil
+	})
+	t.Logf("Phase 1: ConfigMap %s/%s created by Apply relist", namespace, cmName)
+
+	// Phase 2: overwrite the same documentID with Type=Delete and a fresh
+	// updateTime so the GSI poller sees a changed updateTime and fires onChange.
+	// The controller will read the updated spec (Type=Delete) and delete the CM.
+	writeApplyDesireSpec(t, f.dynDB, f.specsPrefix, &kubeapplier.ApplyDesire{
+		DynamoDBMetadata: kubeapplier.DynamoDBMetadata{DocumentID: documentID},
+		Spec: kubeapplier.ApplyDesireSpec{
+			ManagementCluster: "inttest",
+			ClusterID:         "inttest",
+			Type:              kubeapplier.ApplyDesireTypeDelete,
+			TargetItem: kubeapplier.ResourceReference{
+				Version:   "v1",
+				Resource:  "configmaps",
+				Namespace: namespace,
+				Name:      cmName,
+			},
+		},
+	})
+	t.Logf("Phase 2: spec overwritten with Type=Delete — waiting for GSI poller to detect change")
+
+	// The poller fires every 3s; the new updateTime causes FindChanged to fire
+	// onChange; the controller fetches the updated spec and deletes the CM.
+	pollUntil(t, 30*time.Second, func() bool {
+		obj, _ := getConfigMap(f.dynKube, namespace, cmName)
+		return obj == nil
+	})
+	t.Logf("Phase 2: ConfigMap %s/%s deleted via GSI poller + Type=Delete reconcile", namespace, cmName)
 }

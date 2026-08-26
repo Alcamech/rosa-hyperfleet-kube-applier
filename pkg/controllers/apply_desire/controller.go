@@ -173,6 +173,9 @@ func (c *ApplyDesireController) handleUpdate(oldObj, newObj any) {
 	if !oldOK || !newOK {
 		return
 	}
+	// The WatchAdapter delivers fully typed ApplyDesire objects with real
+	// UpdateTime values. Enqueue immediately if the UpdateTime has changed;
+	// otherwise route through the cooldown gate.
 	changed := !oldD.UpdateTime.Equal(newD.UpdateTime)
 	c.enqueueWithCooldown(newD, changed)
 }
