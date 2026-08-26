@@ -43,11 +43,11 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog/v2"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/informers"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/app"
-	hd "github.com/rrp-bot/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/informers"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/app"
+	hd "github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
 )
 
 // ----------------------------------------------------------------------------

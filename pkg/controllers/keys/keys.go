@@ -6,7 +6,7 @@ package keys
 import (
 	"fmt"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 )
 
 // ApplyDesireKey identifies a single ApplyDesire. It is used for both

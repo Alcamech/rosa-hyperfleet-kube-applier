@@ -3,7 +3,7 @@ package keys
 import (
 	"testing"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 )
 
 func TestApplyDesireKeyFromDesire_ClusterScoped(t *testing.T) {

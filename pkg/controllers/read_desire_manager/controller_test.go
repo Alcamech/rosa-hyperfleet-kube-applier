@@ -11,13 +11,13 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	clocktesting "k8s.io/utils/clock/testing"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/controllerutils"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/listertesting"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/conditions"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/desirestatuswriter"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/pkg/controllers/keys"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/controllerutils"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/listertesting"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/conditions"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/desirestatuswriter"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/keys"
 )
 
 func configMapTarget(name string) kubeapplier.ResourceReference {

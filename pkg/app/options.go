@@ -9,8 +9,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/rrp-bot/rosa-hyperfleet-kube-applier/internal/database/informers"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database/informers"
 )
 
 const AppShortDescriptionName = "AWS HCP kube-applier"

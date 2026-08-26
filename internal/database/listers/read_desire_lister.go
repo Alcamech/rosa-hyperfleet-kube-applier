@@ -3,7 +3,7 @@ package listers
 import (
 	"k8s.io/client-go/tools/cache"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 )
 
 type ReadDesireLister interface {

@@ -3,7 +3,7 @@ package database
 import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 )
 
 // Table name suffixes appended to the specs/status prefix supplied at startup.

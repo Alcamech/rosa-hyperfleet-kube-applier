@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	kubeapplier "github.com/rrp-bot/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
 )
 
 // DynamoDBMetadataAccessor provides generic access to the DynamoDB-specific
