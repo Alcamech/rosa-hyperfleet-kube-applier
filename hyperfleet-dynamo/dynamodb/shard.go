@@ -16,6 +16,9 @@ import (
 // The shard value written to DynamoDB items and queried via the GSI must use
 // the same algorithm. ComputeShardDefault uses GSIShardCount (4).
 func ComputeShard(documentID string, shardCount int) string {
+	if shardCount <= 0 {
+		shardCount = GSIShardCount
+	}
 	stripped := strings.ReplaceAll(documentID, "-", "")
 	if len(stripped) < 8 {
 		return "0"
@@ -24,7 +27,7 @@ func ComputeShard(documentID string, shardCount int) string {
 	if err != nil {
 		return "0"
 	}
-	return fmt.Sprintf("%d", int(v)%shardCount)
+	return strconv.FormatUint(v%uint64(shardCount), 10)
 }
 
 // ComputeShardDefault calls ComputeShard with GSIShardCount.
