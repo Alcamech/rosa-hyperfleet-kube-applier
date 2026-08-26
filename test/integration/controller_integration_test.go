@@ -196,7 +196,7 @@ func startApp(t *testing.T, f *fixture) (context.CancelFunc, <-chan error) {
 func startAppFast(t *testing.T, f *fixture) (context.CancelFunc, <-chan error) {
 	return startAppWithWatcherOpts(t, f, hd.Options{
 		PollInterval:   3 * time.Second,
-		RelistInterval: 10 * time.Second,
+		RelistInterval: time.Minute,
 		Logger:         klog.Background(),
 	})
 }
