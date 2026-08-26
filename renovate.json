@@ -1,0 +1,117 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": [
+    "dockerfile",
+    "gomod",
+    "tekton"
+  ],
+  "dockerfile": {
+    "managerFilePatterns": [
+      "/^Containerfile$/"
+    ]
+  },
+  "tekton": {
+    "managerFilePatterns": [
+      "/^\\.tekton\\/.*\\.ya?ml$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Move from 2 segment to 3 segment version",
+      "versioning": "loose",
+      "matchPackageNames": [
+        "/quay.io/konflux-ci//"
+      ]
+    },
+    {
+      "description": "Automerge patch/minor/digest Containerfile updates when Prow + Konflux pass",
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "addLabels": [
+        "automerge",
+        "dependencies",
+        "docker",
+        "lgtm",
+        "approved"
+      ]
+    },
+    {
+      "description": "Require manual review for major Containerfile updates",
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": [
+        "major-update",
+        "manual-review-required",
+        "dependencies",
+        "docker"
+      ]
+    },
+    {
+      "description": "Automerge patch/minor/digest Go module updates when Prow + Konflux pass",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "addLabels": [
+        "automerge",
+        "dependencies",
+        "go-modules",
+        "lgtm",
+        "approved"
+      ]
+    },
+    {
+      "description": "Require manual review for major Go module updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": [
+        "major-update",
+        "manual-review-required",
+        "dependencies",
+        "go-modules"
+      ]
+    },
+    {
+      "description": "Sync go.mod/go.sum after Go updates",
+      "matchManagers": ["gomod"],
+      "postUpgradeTasks": {
+        "commands": ["go mod tidy"],
+        "executionMode": "branch",
+        "fileFilters": ["**/go.mod", "**/go.sum"]
+      }
+    },
+    {
+      "description": "Automerge Konflux Tekton reference updates when Prow + Konflux pass",
+      "matchManagers": ["tekton"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "addLabels": [
+        "automerge",
+        "dependencies",
+        "lgtm",
+        "approved"
+      ]
+    },
+    {
+      "description": "Require manual review for major Tekton updates",
+      "matchManagers": ["tekton"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": [
+        "major-update",
+        "manual-review-required",
+        "dependencies"
+      ]
+    }
+  ],
+  "rebaseWhen": "behind-base-branch",
+  "ignoreTests": false
+}
