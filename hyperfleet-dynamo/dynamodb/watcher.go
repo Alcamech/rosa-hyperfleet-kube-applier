@@ -170,8 +170,11 @@ func (w *Watcher) Run(ctx context.Context) {
 		w.relistLoop(ctx)
 	}()
 
-	// Give the relist goroutine a head start so the first relist can seed the
-	// cache before the fast poll fires.
+	// Small startup delay before launching the fast poll. With production
+	// relist intervals (5m) this does not seed the cache — the first few fast
+	// polls will redundantly rediscover items the informer List already found.
+	// The delay is mainly useful in tests where RelistInterval is tiny and the
+	// first relist completes within the delay window.
 	select {
 	case <-ctx.Done():
 		<-relistDone
