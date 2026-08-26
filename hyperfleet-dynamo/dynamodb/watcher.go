@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -99,6 +100,7 @@ type Watcher struct {
 	client    *dynamodb.Client
 	tableName string
 	onChange  OnChange
+	cbMu      sync.Mutex
 	opts      Options
 	cache     *Cache
 	stopCh    chan struct{}
@@ -129,6 +131,14 @@ func (w *Watcher) Done() <-chan struct{} {
 // Stop signals the watcher to stop and waits for it to exit cleanly.
 func (w *Watcher) Stop() {
 	close(w.stopCh)
+}
+
+// emit invokes onChange under cbMu so relist and fast-poll callbacks never
+// overlap, honoring the non-concurrent contract documented on OnChange.
+func (w *Watcher) emit(docID string, item Item) {
+	w.cbMu.Lock()
+	defer w.cbMu.Unlock()
+	w.onChange(docID, item)
 }
 
 // Run starts the watcher's two loops and blocks until the context is cancelled
@@ -181,7 +191,7 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 	// poll begins. With production relist intervals (5m) the ticker's first
 	// tick fires well after the fast poll has already started; without this
 	// eager call the cache would be empty for the first ~5 minutes.
-	if w.runRelist(ctx, log) && firstRelist {
+	if w.runRelist(ctx, log) {
 		firstRelist = false
 		close(w.doneCh)
 	}
@@ -196,7 +206,10 @@ func (w *Watcher) relistLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			log.Info("relist tick firing")
-			w.runRelist(ctx, log)
+			if w.runRelist(ctx, log) && firstRelist {
+				firstRelist = false
+				close(w.doneCh)
+			}
 		}
 	}
 }
@@ -227,14 +240,14 @@ func (w *Watcher) runRelist(ctx context.Context, log logr.Logger) bool {
 	)
 
 	for _, docID := range added {
-		w.onChange(docID, fullItems[docID])
+		w.emit(docID, fullItems[docID])
 	}
 	for _, docID := range modified {
-		w.onChange(docID, fullItems[docID])
+		w.emit(docID, fullItems[docID])
 	}
 	// Deleted items are gone from the table — deliver nil to signal deletion.
 	for _, docID := range deleted {
-		w.onChange(docID, nil)
+		w.emit(docID, nil)
 	}
 	return true
 }
@@ -312,6 +325,6 @@ func (w *Watcher) runFastPoll(ctx context.Context, log logr.Logger) {
 			log.Info("fast poll: item absent from BatchGet (likely deleted, relist will confirm)", "documentID", docID)
 			continue
 		}
-		w.onChange(docID, item)
+		w.emit(docID, item)
 	}
 }

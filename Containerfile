@@ -5,7 +5,6 @@ RUN microdnf install -y golang git && microdnf clean all
 
 WORKDIR /app
 COPY go.mod go.sum ./
-COPY go.mod go.sum ./
 COPY hyperfleet-dynamo/go.mod ./hyperfleet-dynamo/go.mod
 RUN go mod download
 COPY . .

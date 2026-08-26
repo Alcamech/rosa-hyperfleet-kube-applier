@@ -25,7 +25,10 @@ func QuerySince(
 	since time.Time,
 	shardCount int,
 ) (map[string]time.Time, error) {
-	sinceStr := since.UTC().Format(time.RFC3339)
+	// Format since using RFC3339Nano to match the encoding that
+	// attributevalue.MarshalMap uses for time.Time fields on the write path.
+	// Using >= ensures items written at the exact boundary second are not missed.
+	sinceStr := since.UTC().Format(time.RFC3339Nano)
 
 	var mu sync.Mutex
 	results := make(map[string]time.Time)
@@ -67,7 +70,7 @@ func queryShard(
 		input := &dynamodb.QueryInput{
 			TableName:              aws.String(tableName),
 			IndexName:              aws.String(GSIName),
-			KeyConditionExpression: aws.String("#s = :shard AND #t > :since"),
+			KeyConditionExpression: aws.String("#s = :shard AND #t >= :since"),
 			ExpressionAttributeNames: map[string]string{
 				"#s": "shard",
 				"#t": "updateTime",
@@ -139,7 +142,21 @@ func BatchGetItems(
 			tableName: {Keys: keys},
 		}
 
-		for len(remaining) > 0 {
+		backoff := 50 * time.Millisecond
+		for attempt := 0; len(remaining) > 0; attempt++ {
+			if attempt >= 10 {
+				return nil, fmt.Errorf("BatchGetItem %s: unprocessed keys remain after %d attempts", tableName, attempt)
+			}
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, fmt.Errorf("BatchGetItem %s: %w", tableName, ctx.Err())
+				case <-time.After(backoff):
+				}
+				if backoff < 2*time.Second {
+					backoff *= 2
+				}
+			}
 			out, err := client.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{
 				RequestItems: remaining,
 			})
