@@ -1,7 +1,6 @@
 package dynamodb
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 )
