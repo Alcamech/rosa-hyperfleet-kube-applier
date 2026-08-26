@@ -103,6 +103,56 @@ func TestWatchAdapter_ResultChanClosesOnCtxCancel(t *testing.T) {
 	}
 }
 
+// TestWatchAdapter_DeliversDeleted verifies that when a relist detects a hard
+// delete (item present in first scan, absent in second), the WatchAdapter emits
+// a watch.Deleted event on ResultChan carrying a tombstone object whose Name
+// equals the deleted documentID.
+//
+// This exercises the tombstoneObject → watch.Deleted code path in the OnChange
+// callback, which is not covered by the Modified test above.
+func TestWatchAdapter_DeliversDeleted(t *testing.T) {
+	fd := newFakeDynamo()
+	// Eager relist: doc-deleted is present.
+	fd.setScanItems(stubItems(map[string]time.Time{"doc-deleted": t1}))
+	// Second relist tick: doc-deleted is gone from the table.
+	fd.setScanItems(nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	adapter := NewWatchAdapter(ctx, fd.newClient(), "test-table", Options{
+		PollInterval:   time.Hour,
+		RelistInterval: 30 * time.Millisecond,
+		ShardCount:     GSIShardCount,
+	}, testDecodeFn)
+	defer adapter.Stop()
+
+	// Collect events until we see a Deleted or time out.
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case evt, ok := <-adapter.ResultChan():
+			if !ok {
+				t.Fatal("ResultChan closed before receiving Deleted event")
+			}
+			if evt.Type != watch.Deleted {
+				// Skip non-Deleted events (e.g. the Modified from the eager relist).
+				continue
+			}
+			pom, ok := evt.Object.(*metav1.PartialObjectMetadata)
+			if !ok {
+				t.Fatalf("Deleted event object: got %T, want *metav1.PartialObjectMetadata", evt.Object)
+			}
+			if pom.Name != "doc-deleted" {
+				t.Errorf("Deleted event name: got %q, want %q", pom.Name, "doc-deleted")
+			}
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for Deleted event on ResultChan")
+		}
+	}
+}
+
 // TestWatchAdapter_Stop_ClosesResultChan verifies that calling Stop() on the
 // adapter causes the underlying Watcher to stop and resultCh to close.
 func TestWatchAdapter_Stop_ClosesResultChan(t *testing.T) {
