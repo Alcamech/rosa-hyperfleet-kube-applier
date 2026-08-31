@@ -1,10 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "group:allDigest"
+  ],
   "enabledManagers": [
     "dockerfile",
     "gomod",
     "tekton"
   ],
+  "timezone": "UTC",
   "dockerfile": {
     "managerFilePatterns": [
       "/^Containerfile$/"
@@ -24,9 +28,11 @@
       ]
     },
     {
-      "description": "Automerge patch/minor/digest Containerfile updates when Prow + Konflux pass",
+      "description": "Batch + automerge patch/minor/digest Containerfile updates when Prow + Konflux pass",
       "matchManagers": ["dockerfile"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "matchUpdateTypes": ["patch", "minor", "pin", "digest"],
+      "groupName": "dockerfile dependencies",
+      "schedule": ["* 2-4 * * 1-5"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true,
@@ -51,9 +57,11 @@
       ]
     },
     {
-      "description": "Automerge patch/minor/digest Go module updates when Prow + Konflux pass",
+      "description": "Batch + automerge patch/minor/digest Go module updates when Prow + Konflux pass",
       "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "matchUpdateTypes": ["patch", "minor", "pin", "digest"],
+      "groupName": "gomod dependencies",
+      "schedule": ["* 2-4 * * 1-5"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true,
@@ -87,9 +95,11 @@
       }
     },
     {
-      "description": "Automerge Konflux Tekton reference updates when Prow + Konflux pass",
+      "description": "Batch + automerge Konflux Tekton reference updates when Prow + Konflux pass",
       "matchManagers": ["tekton"],
-      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "matchUpdateTypes": ["patch", "minor", "pin", "digest"],
+      "groupName": "tekton dependencies",
+      "schedule": ["* 2-4 * * 1-5"],
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true,
