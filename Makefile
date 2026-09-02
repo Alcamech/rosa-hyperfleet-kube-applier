@@ -1,6 +1,6 @@
 .PHONY: help build desire-tool desirectl \
 	test test-unit test-integration \
-	fmt vet lint verify \
+	fmt vet lint verify tidy verify-mod \
 	image image-push \
 	infra-up infra-down localstack kind-setup \
 	run-local clean
@@ -46,7 +46,7 @@ help:
 	@echo "  fmt              go fmt on all packages"
 	@echo "  vet              go vet on all packages"
 	@echo "  lint             golangci-lint on all packages"
-	@echo "  verify           go mod tidy + check for drift"
+	@echo "  verify           tidy all modules + check for drift"
 	@echo ""
 	@echo "Images:"
 	@echo "  image            Build container image (podman or docker)"
@@ -102,9 +102,19 @@ vet:
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run --config .golangci.yml --timeout 5m ./...
 
-verify:
-	go mod tidy
-	git diff --exit-code go.mod go.sum
+MOD_TIDY_DIRS := . hyperfleet-dynamo hack/tools
+MOD_TIDY_FILES := go.mod go.sum hyperfleet-dynamo/go.mod hyperfleet-dynamo/go.sum hack/tools/go.mod hack/tools/go.sum
+
+tidy:
+	@set -e; for d in $(MOD_TIDY_DIRS); do \
+		echo "go mod tidy: $$d"; \
+		(cd "$$d" && go mod tidy); \
+	done
+
+verify-mod: tidy
+	git diff --exit-code $(MOD_TIDY_FILES)
+
+verify: verify-mod
 
 # ── Images ───────────────────────────────────────────────────────────────
 
