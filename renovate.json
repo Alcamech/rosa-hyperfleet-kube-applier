@@ -9,6 +9,9 @@
     "tekton"
   ],
   "timezone": "UTC",
+  "constraints": {
+    "go": "1.26"
+  },
   "dockerfile": {
     "managerFilePatterns": [
       "/^Containerfile$/"
@@ -57,7 +60,13 @@
       ]
     },
     {
-      "description": "Do not propose Go modules that require a newer toolchain than go.mod",
+      "description": "Never bump go/toolchain directives; Go upgrades stay manual",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "enabled": false
+    },
+    {
+      "description": "Skip module updates that require newer than Go 1.26",
       "matchManagers": ["gomod"],
       "constraintsFiltering": "strict"
     },
