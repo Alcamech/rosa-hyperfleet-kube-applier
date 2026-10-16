@@ -333,4 +333,4 @@ LOCALSTACK_ENDPOINT=http://localhost:4566 \
 ```
 
 Both `LOCALSTACK_ENDPOINT` and `KUBECONFIG` must be set; tests are skipped otherwise.
-Each test creates its own uniquely-prefixed tables and deletes them in `t.Cleanup`.
+Each test creates its own uniquely-prefixed tables and removes them in `t.Cleanup`.
