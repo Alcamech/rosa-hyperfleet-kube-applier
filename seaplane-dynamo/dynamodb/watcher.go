@@ -150,7 +150,7 @@ func (w *Watcher) emit(docID string, item Item) {
 //  2. Both the relist goroutine (now looping on the ticker) and the fast poll
 //     goroutine run concurrently.
 func (w *Watcher) Run(ctx context.Context) {
-	log := w.opts.logger().WithValues("table", w.tableName, "component", "hyperfleet-dynamo/watcher")
+	log := w.opts.logger().WithValues("table", w.tableName, "component", "seaplane-dynamo/watcher")
 	log.Info("watcher starting",
 		"pollInterval", w.opts.pollInterval(),
 		"relistInterval", w.opts.relistInterval(),
@@ -179,7 +179,7 @@ func (w *Watcher) Run(ctx context.Context) {
 // then continues on a ticker. After the first successful relist it closes
 // doneCh to signal natural expiry to the Manager.
 func (w *Watcher) relistLoop(ctx context.Context) {
-	log := w.opts.logger().WithValues("table", w.tableName, "component", "hyperfleet-dynamo/relist")
+	log := w.opts.logger().WithValues("table", w.tableName, "component", "seaplane-dynamo/relist")
 	ticker := time.NewTicker(w.opts.relistInterval())
 	defer ticker.Stop()
 
@@ -254,7 +254,7 @@ func (w *Watcher) runRelist(ctx context.Context, log logr.Logger) bool {
 
 // fastPollLoop queries the GSI on a ticker using the expanding lookback window.
 func (w *Watcher) fastPollLoop(ctx context.Context) {
-	log := w.opts.logger().WithValues("table", w.tableName, "component", "hyperfleet-dynamo/poll")
+	log := w.opts.logger().WithValues("table", w.tableName, "component", "seaplane-dynamo/poll")
 	ticker := time.NewTicker(w.opts.pollInterval())
 	defer ticker.Stop()
 

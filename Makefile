@@ -80,7 +80,7 @@ test: test-unit test-integration
 
 test-unit:
 	GOTELEMETRY=off go test -vet=off -race -count=1 ./...
-	cd hyperfleet-dynamo && GOTELEMETRY=off go test -vet=off -race -count=1 ./...
+	cd seaplane-dynamo && GOTELEMETRY=off go test -vet=off -race -count=1 ./...
 
 # test-integration runs controller-level tests that need both LocalStack and a
 # Kind cluster. infra-up is run first and is idempotent — existing containers
@@ -102,8 +102,8 @@ vet:
 lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run --config .golangci.yml --timeout 5m ./...
 
-MOD_TIDY_DIRS := . hyperfleet-dynamo hack/tools
-MOD_TIDY_FILES := go.mod go.sum hyperfleet-dynamo/go.mod hyperfleet-dynamo/go.sum hack/tools/go.mod hack/tools/go.sum
+MOD_TIDY_DIRS := . seaplane-dynamo hack/tools
+MOD_TIDY_FILES := go.mod go.sum seaplane-dynamo/go.mod seaplane-dynamo/go.sum hack/tools/go.mod hack/tools/go.sum
 
 tidy:
 	@set -e; for d in $(MOD_TIDY_DIRS); do \

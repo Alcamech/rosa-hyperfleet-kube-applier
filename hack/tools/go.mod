@@ -1,4 +1,4 @@
-module github.com/openshift-online/rosa-hyperfleet-kube-applier/hack/tools
+module github.com/openshift-online/rosa-seaplane-kube-applier/hack/tools
 
 go 1.26.3
 

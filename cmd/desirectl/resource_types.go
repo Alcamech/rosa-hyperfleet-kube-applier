@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
+	kubeapplier "github.com/openshift-online/rosa-seaplane-kube-applier/api/kubeapplier"
 )
 
 type ResourceInfo struct {

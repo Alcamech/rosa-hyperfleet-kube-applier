@@ -33,7 +33,7 @@
 //     produce a typed runtime.Object (*ApplyDesire or *ReadDesire) and emits
 //     a watch.Modified/Deleted event to the SharedIndexInformer.
 //
-//   - hyperfleet-operator: statusstream.Manager ignores item and dispatches
+//   - seaplane-operator: statusstream.Manager ignores item and dispatches
 //     only documentID to the EventRouter, which enqueues a GenericEvent to
 //     the controller workqueue. The controller performs its own consistent
 //     GetItem when it reconciles.
@@ -56,7 +56,7 @@
 // range_key=updateTime). Items are assigned to shard buckets "0"–"3" by
 // ComputeShard. All shards are queried in parallel. The shard count
 // (GSIShardCount=4) MUST match the Terraform definition in
-// rosa-hyperfleet/terraform/modules/kube-applier-dynamodb/main.tf.
+// rosa-seaplane/terraform/modules/kube-applier-dynamodb/main.tf.
 //
 // Items must have shard and updateTime attributes set at write time for the
 // fast poller to see them.

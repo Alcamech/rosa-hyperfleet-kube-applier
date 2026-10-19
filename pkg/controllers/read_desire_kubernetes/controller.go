@@ -25,11 +25,11 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/internal/database"
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/conditions"
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/desirestatuswriter"
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/pkg/controllers/keys"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/api/kubeapplier"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/internal/database"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/pkg/controllers/conditions"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/pkg/controllers/desirestatuswriter"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/pkg/controllers/keys"
 )
 
 // ResyncDuration is how often a ReadDesireKubernetesController re-evaluates

@@ -1,8 +1,8 @@
-module github.com/openshift-online/rosa-hyperfleet-kube-applier
+module github.com/openshift-online/rosa-seaplane-kube-applier
 
 go 1.26.3
 
-replace github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo => ./hyperfleet-dynamo
+replace github.com/openshift-online/rosa-seaplane-kube-applier/seaplane-dynamo => ./seaplane-dynamo
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.46.0
@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue v1.21.3
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.67.0
 	github.com/google/uuid v1.6.0
-	github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo v0.0.0-00010101000000-000000000000
+	github.com/openshift-online/rosa-seaplane-kube-applier/seaplane-dynamo v0.0.0-00010101000000-000000000000
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	k8s.io/apimachinery v0.37.1

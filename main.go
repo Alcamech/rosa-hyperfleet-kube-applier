@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/openshift-online/rosa-hyperfleet-kube-applier/cmd"
+	"github.com/openshift-online/rosa-seaplane-kube-applier/cmd"
 )
 
 func main() {

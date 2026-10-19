@@ -2,14 +2,14 @@
 
 `kube-applier-aws` is the AWS/DynamoDB port of `kube-applier-gcp`. It runs one
 controller replica per Management Cluster (MC) and bridges the desire loop
-written by [hyperfleet-operator](https://github.com/typeid/hyperfleet-operator)
+written by [seaplane-operator](https://github.com/typeid/seaplane-operator)
 into live Kubernetes objects on that cluster.
 
 ## System overview
 
 ```mermaid
 graph LR
-    HF["hyperfleet-operator\n(RC account)"]
+    HF["seaplane-operator\n(RC account)"]
     DBS["DynamoDB specs tables\n(RC account)"]
     KA["kube-applier-aws\n(MC account)"]
     API["MC kube-apiserver"]
@@ -33,10 +33,10 @@ prefix convention passed to the controller via `--specs-table` and
 
 | Table suffix | Direction | GSI | PITR |
 |---|---|---|---|
-| `{mc}-specs-applydesires` | hyperfleet-operator → controller | `updateTime-index` | non-ephemeral |
-| `{mc}-specs-readdesires` | hyperfleet-operator → controller | `updateTime-index` | non-ephemeral |
-| `{mc}-status-applydesires` | controller → hyperfleet-operator | — | non-ephemeral |
-| `{mc}-status-readdesires` | controller → hyperfleet-operator | — | non-ephemeral |
+| `{mc}-specs-applydesires` | seaplane-operator → controller | `updateTime-index` | non-ephemeral |
+| `{mc}-specs-readdesires` | seaplane-operator → controller | `updateTime-index` | non-ephemeral |
+| `{mc}-status-applydesires` | controller → seaplane-operator | — | non-ephemeral |
+| `{mc}-status-readdesires` | controller → seaplane-operator | — | non-ephemeral |
 
 The partition key in every table is `documentID` (string). The specs tables
 carry a `updateTime-index` GSI (hash key: `shard`, range key: `updateTime`)
@@ -58,16 +58,16 @@ NamespaceUUID = a3f1b2c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c
 The same inputs always yield the same UUID. Crash-and-retry by the writer
 computes the same ID and hits the `ErrAlreadyExists` guard on the DynamoDB
 `ConditionExpression` rather than creating a duplicate. Different `taskKey`
-values (e.g. different hyperfleet-operator field managers) produce different
+values (e.g. different seaplane-operator field managers) produce different
 UUIDs for the same Kubernetes resource.
 
-The namespace UUID is shared between this repository and hyperfleet-operator.
+The namespace UUID is shared between this repository and seaplane-operator.
 It must never be changed after initial deployment — doing so would invalidate
 all existing document IDs.
 
 ## Informers and change detection
 
-Each specs table is watched via the `hyperfleet-dynamo` two-speed engine:
+Each specs table is watched via the `seaplane-dynamo` two-speed engine:
 
 1. **Initial list (Scan)** — on startup the informer issues a full `Scan` to
    populate its in-memory store.
@@ -81,7 +81,7 @@ Each specs table is watched via the `hyperfleet-dynamo` two-speed engine:
 
 The `WatchAdapter` translates `OnChange` callbacks into typed `watch.Event`
 objects (`*ApplyDesire` / `*ReadDesire`) consumed by the `SharedIndexInformer`.
-See `hyperfleet-dynamo/dynamodb/doc.go` for the full engine description.
+See `seaplane-dynamo/dynamodb/doc.go` for the full engine description.
 
 ## Optimistic concurrency
 
@@ -143,6 +143,6 @@ and IAM — each controller role is scoped to its own MC's tables.
 | `KubeContent` wire format | Firestore nested map | JSON string in `spec_kubeContent` / `status_kubeContent` S attribute |
 | Credential delivery | GKE Workload Identity | EKS Pod Identity (cross-account) |
 
-For the hyperfleet-operator side of the desire loop — how desires are written
+For the seaplane-operator side of the desire loop — how desires are written
 and how status is consumed — see the
-[hyperfleet-operator architecture doc](https://github.com/typeid/hyperfleet-operator/blob/main/docs/architecture.md).
+[seaplane-operator architecture doc](https://github.com/typeid/seaplane-operator/blob/main/docs/architecture.md).
