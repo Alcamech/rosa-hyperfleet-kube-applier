@@ -5,7 +5,7 @@ import "time"
 const (
 	// GSIShardCount is the number of shard buckets on the updateTime-index GSI.
 	// MUST match the Terraform definition in:
-	//   rosa-hyperfleet/terraform/modules/kube-applier-dynamodb/main.tf
+	//   rosa-seaplane/terraform/modules/kube-applier-dynamodb/main.tf
 	GSIShardCount = 4
 
 	// GSIName is the DynamoDB GSI used for fast polling.

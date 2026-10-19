@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	kubeapplier "github.com/openshift-online/rosa-hyperfleet-kube-applier/api/kubeapplier"
-	hd "github.com/openshift-online/rosa-hyperfleet-kube-applier/hyperfleet-dynamo/dynamodb"
+	kubeapplier "github.com/openshift-online/rosa-seaplane-kube-applier/api/kubeapplier"
+	hd "github.com/openshift-online/rosa-seaplane-kube-applier/seaplane-dynamo/dynamodb"
 )
 
 // desire is the type constraint for the generic CRUD implementations. It
@@ -75,7 +75,7 @@ func desireToItem[T any, PT desire[T]](pt PT) (map[string]types.AttributeValue, 
 
 	// Set the shard attribute for the updateTime-index GSI.
 	// GSIShardCount must match the Terraform definition in
-	// rosa-hyperfleet/terraform/modules/kube-applier-dynamodb/main.tf.
+	// rosa-seaplane/terraform/modules/kube-applier-dynamodb/main.tf.
 	item["shard"] = &types.AttributeValueMemberS{Value: hd.ComputeShardDefault(pt.GetDocumentID())}
 
 	// Merge kubeContent string attributes.

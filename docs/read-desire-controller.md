@@ -1,7 +1,7 @@
 # ReadDesire Controller
 
 The ReadDesire subsystem mirrors live Kubernetes objects back into DynamoDB so
-that hyperfleet-operator can read the current state of resources it cares about.
+that seaplane-operator can read the current state of resources it cares about.
 It is implemented as two cooperating controllers.
 
 ## Two-controller architecture
@@ -26,7 +26,7 @@ controller is responsible for **what** the live object looks like right now.
 
 ```mermaid
 sequenceDiagram
-    participant HF as hyperfleet-operator
+    participant HF as seaplane-operator
     participant DBS as DynamoDB specs table
     participant MGR as ReadDesireInformerManagingController
     participant KUB as ReadDesireKubernetesController (per-instance)
@@ -126,6 +126,6 @@ populated before printing and deleting the document. This is a developer
 convenience tool; `ReadDesire` documents are not normally created by hand in
 production.
 
-For the hyperfleet-operator side of ReadDesire — how specs are written and
+For the seaplane-operator side of ReadDesire — how specs are written and
 status consumed — see the
-[hyperfleet-operator nodepool controller doc](https://github.com/typeid/hyperfleet-operator/blob/main/docs/nodepool-controller.md).
+[seaplane-operator nodepool controller doc](https://github.com/typeid/seaplane-operator/blob/main/docs/nodepool-controller.md).

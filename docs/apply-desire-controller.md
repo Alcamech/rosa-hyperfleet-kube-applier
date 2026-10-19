@@ -13,7 +13,7 @@ The `ApplyDesireController` reconciles `ApplyDesire` documents. The
 
 ```mermaid
 sequenceDiagram
-    participant HF as hyperfleet-operator
+    participant HF as seaplane-operator
     participant DBS as DynamoDB specs table
     participant INF as ApplyDesire informer
     participant CTL as ApplyDesireController
@@ -158,6 +158,6 @@ the `spec_kubeContent` S attribute (via `rawext_codec.go`). The controller
 unmarshals it on read. The same JSON-string convention applies to
 `status.kubeContent` in the status table (`status_kubeContent` S attribute).
 
-For the hyperfleet-operator side of ApplyDesire — how specs are written and
+For the seaplane-operator side of ApplyDesire — how specs are written and
 status consumed — see the
-[hyperfleet-operator cluster controller doc](https://github.com/typeid/hyperfleet-operator/blob/main/docs/cluster-controller.md).
+[seaplane-operator cluster controller doc](https://github.com/typeid/seaplane-operator/blob/main/docs/cluster-controller.md).

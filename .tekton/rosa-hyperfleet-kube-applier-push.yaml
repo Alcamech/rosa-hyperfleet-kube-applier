@@ -2,17 +2,17 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/openshift-online/rosa-hyperfleet-kube-applier?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/openshift-online/rosa-seaplane-kube-applier?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "main"
   labels:
-    appstudio.openshift.io/application: rosa-hyperfleet-kube-applier
-    appstudio.openshift.io/component: rosa-hyperfleet-kube-applier
+    appstudio.openshift.io/application: rosa-seaplane-kube-applier
+    appstudio.openshift.io/component: rosa-seaplane-kube-applier
     pipelines.appstudio.openshift.io/type: build
-  name: rosa-hyperfleet-kube-applier-on-push
+  name: rosa-seaplane-kube-applier-on-push
   namespace: rosa-tenant
 spec:
   params:
@@ -21,7 +21,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/rosa-tenant/rosa-hyperfleet-kube-applier:{{revision}}
+    value: quay.io/redhat-user-workloads/rosa-tenant/rosa-seaplane-kube-applier:{{revision}}
   - name: build-platforms
     value:
     - linux/x86_64
@@ -555,7 +555,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
-    serviceAccountName: build-pipeline-rosa-hyperfleet-kube-applier
+    serviceAccountName: build-pipeline-rosa-seaplane-kube-applier
   workspaces:
   - name: git-auth
     secret:
