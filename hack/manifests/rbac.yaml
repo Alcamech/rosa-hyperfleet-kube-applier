@@ -3,6 +3,12 @@ kind: ClusterRole
 metadata:
   name: kube-applier
 rules:
+  # Accepted risk: wildcard RBAC is intentional by design.
+  # kube-applier is a GitOps controller that reads Desire documents from
+  # DynamoDB and reconciles them against the local Kubernetes API server.
+  # It must be able to apply, delete, and read any Kubernetes resource
+  # type across all namespaces. Restricting these grants would break the
+  # controller's core functionality.
   - apiGroups: ["*"]
     resources: ["*"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
