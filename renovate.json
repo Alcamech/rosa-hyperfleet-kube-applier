@@ -14,7 +14,8 @@
   },
   "dockerfile": {
     "managerFilePatterns": [
-      "/^Containerfile$/"
+      "/^Containerfile$/",
+      "/^ci/Containerfile$/"
     ]
   },
   "tekton": {
